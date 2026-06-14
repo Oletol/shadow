@@ -1,0 +1,2016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pronunciation Shadowing Practice</title>
+
+<!--
+  =====================================================================
+  PRONUNCIATION SHADOWING PRACTICE - Moodle-ready single-file activity
+  ---------------------------------------------------------------------
+  TEACHER: To customise the activity without using the Teacher Settings
+  panel, edit the placeholder values inside the data-* attributes on
+  the #psp-app wrapper below, OR replace the URLs directly in the
+  marked locations:
+
+    1. VIDEO URL          -> data-default-video   (and <source> in <video>)
+    2. ORIGINAL AUDIO URL -> data-default-audio   (and <audio> src)
+    3. TARGET PHRASE      -> data-default-phrase
+    4. PRACTICE TITLE     -> data-default-title
+
+  All of these can also be edited from the in-page "Teacher Settings"
+  block, which stores values in the browser's localStorage.
+  =====================================================================
+-->
+
+<!-- External libraries (loaded from CDN). If any fail to load, the
+     page falls back to Web Audio + Canvas based visualisations. -->
+<script src="https://unpkg.com/wavesurfer.js@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script type="module">
+  // Pitchy is an ES module. We attach it to window so the rest of the
+  // (non-module) script can detect and use it. If this import fails,
+  // the page falls back to a simple autocorrelation pitch estimator.
+  try {
+    const mod = await import('https://esm.sh/pitchy@4');
+    window.PSP_Pitchy = mod;
+  } catch (e) {
+    console.warn('Pitchy failed to load, fallback pitch detector will be used.', e);
+  }
+</script>
+
+<style>
+/* =====================================================================
+   All styles scoped under #psp-app to avoid clashing with Moodle CSS.
+   ===================================================================== */
+#psp-app {
+  --psp-dark: #1D2125;
+  --psp-deep: #377490;
+  --psp-soft: #65A9B4;
+  --psp-bg:   #F8FAFC;
+  --psp-pane: #EEF4F8;
+  --psp-border: #D6E2EA;
+  --psp-accent: #F5851C;
+  --psp-text: #1D2125;
+  --psp-muted: #5b6b75;
+  --psp-good: #2f8a5b;
+  --psp-warn: #c98a2a;
+  --psp-bad:  #b94a48;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  color: var(--psp-text);
+  background: var(--psp-bg);
+  padding: 20px;
+  line-height: 1.55;
+  font-size: 16px;
+  max-width: 1100px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+#psp-app *, #psp-app *::before, #psp-app *::after { box-sizing: border-box; }
+
+#psp-app h1, #psp-app h2, #psp-app h3, #psp-app h4 {
+  color: var(--psp-dark);
+  margin: 0 0 10px 0;
+  font-weight: 600;
+  line-height: 1.25;
+}
+#psp-app h1 { font-size: 1.9rem; }
+#psp-app h2 { font-size: 1.25rem; }
+#psp-app h3 { font-size: 1.05rem; }
+#psp-app p  { margin: 0 0 10px 0; }
+
+#psp-app .psp-header {
+  background: linear-gradient(135deg, var(--psp-deep), var(--psp-soft));
+  color: #fff;
+  padding: 24px 28px;
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(29,33,37,0.08);
+  margin-bottom: 22px;
+}
+#psp-app .psp-header h1 { color: #fff; }
+#psp-app .psp-header .psp-subtitle {
+  font-size: 1.05rem; opacity: 0.95; margin-bottom: 12px;
+}
+#psp-app .psp-header .psp-note {
+  background: rgba(255,255,255,0.15);
+  border-left: 4px solid #fff;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  margin-top: 12px;
+}
+
+#psp-app .psp-card {
+  background: #fff;
+  border: 1px solid var(--psp-border);
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin-bottom: 18px;
+  box-shadow: 0 2px 8px rgba(29,33,37,0.04);
+}
+#psp-app .psp-card .psp-step {
+  display: inline-block;
+  background: var(--psp-pane);
+  color: var(--psp-deep);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+
+#psp-app button.psp-btn {
+  background: var(--psp-deep);
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-weight: 500;
+  margin: 4px 6px 4px 0;
+  transition: background 0.15s, transform 0.05s;
+}
+#psp-app button.psp-btn:hover:not(:disabled) { background: #2d6079; }
+#psp-app button.psp-btn:active:not(:disabled) { transform: translateY(1px); }
+#psp-app button.psp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#psp-app button.psp-btn.psp-btn-secondary {
+  background: #fff; color: var(--psp-deep);
+  border: 1px solid var(--psp-deep);
+}
+#psp-app button.psp-btn.psp-btn-secondary:hover:not(:disabled) {
+  background: var(--psp-pane);
+}
+#psp-app button.psp-btn.psp-btn-danger { background: var(--psp-bad); }
+#psp-app button.psp-btn.psp-btn-danger:hover:not(:disabled) { background: #93302e; }
+#psp-app button.psp-btn.psp-btn-accent {
+  background: var(--psp-accent);
+}
+#psp-app button.psp-btn.psp-btn-accent:hover:not(:disabled) { background: #c96a13; }
+
+#psp-app .psp-button-row {
+  display: flex; flex-wrap: wrap; gap: 0; margin: 10px 0;
+}
+
+#psp-app video, #psp-app audio {
+  width: 100%; max-width: 100%;
+  border-radius: 8px; background: #000;
+}
+#psp-app audio { background: var(--psp-pane); }
+
+#psp-app .psp-phrase-card {
+  background: var(--psp-pane);
+  border: 1px solid var(--psp-border);
+  border-left: 4px solid var(--psp-deep);
+  padding: 14px 18px;
+  border-radius: 8px;
+  margin: 14px 0;
+  font-size: 1.15rem;
+  font-style: italic;
+  color: var(--psp-dark);
+}
+
+#psp-app .psp-viz {
+  background: var(--psp-pane);
+  border: 1px solid var(--psp-border);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 10px 0;
+  min-height: 100px;
+}
+#psp-app .psp-viz-label {
+  font-size: 0.85rem;
+  color: var(--psp-muted);
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#psp-app canvas.psp-canvas {
+  width: 100%; height: 120px; display: block; background: #fff;
+  border-radius: 4px;
+}
+#psp-app .psp-wave { width: 100%; min-height: 80px; background: #fff; border-radius: 4px; }
+
+#psp-app .psp-info-msg {
+  background: #fff7eb;
+  border: 1px solid #f7d6a3;
+  color: #7a4a0d;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  margin: 10px 0;
+}
+#psp-app .psp-error-msg {
+  background: #fdecea;
+  border: 1px solid #f5c2bd;
+  color: #8a2620;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  margin: 10px 0;
+}
+#psp-app .psp-success-msg {
+  background: #e9f5ee;
+  border: 1px solid #b9e0c8;
+  color: #245d3d;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  margin: 10px 0;
+}
+
+#psp-app .psp-grid-2 {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+}
+@media (max-width: 760px) {
+  #psp-app .psp-grid-2 { grid-template-columns: 1fr; }
+}
+
+#psp-app .psp-compare-block {
+  border: 1px solid var(--psp-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  margin-bottom: 12px;
+}
+#psp-app .psp-compare-block h4 {
+  color: var(--psp-deep);
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+#psp-app .psp-score-row {
+  display: grid;
+  grid-template-columns: 180px 1fr 60px;
+  gap: 10px; align-items: center;
+  margin: 8px 0;
+}
+@media (max-width: 600px) {
+  #psp-app .psp-score-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+#psp-app .psp-score-label { font-size: 0.9rem; color: var(--psp-muted); font-weight: 500; }
+#psp-app .psp-score-track {
+  background: var(--psp-pane);
+  border-radius: 999px;
+  height: 14px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--psp-border);
+}
+#psp-app .psp-score-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--psp-soft), var(--psp-deep));
+  width: 0%;
+  transition: width 0.5s ease;
+  border-radius: 999px;
+}
+#psp-app .psp-score-value {
+  font-weight: 700; color: var(--psp-deep); text-align: right; font-size: 0.95rem;
+}
+
+#psp-app .psp-overall-score {
+  text-align: center; margin: 14px 0 20px 0;
+}
+#psp-app .psp-overall-score .psp-overall-num {
+  font-size: 3rem; font-weight: 700; color: var(--psp-deep); line-height: 1;
+}
+#psp-app .psp-overall-score .psp-overall-band {
+  font-size: 1.05rem; color: var(--psp-dark); margin-top: 4px; font-weight: 600;
+}
+#psp-app .psp-big-score-track {
+  background: var(--psp-pane);
+  border: 1px solid var(--psp-border);
+  border-radius: 999px;
+  height: 24px;
+  overflow: hidden;
+  margin: 12px auto;
+  max-width: 600px;
+}
+#psp-app .psp-big-score-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #b94a48, var(--psp-accent), var(--psp-soft), var(--psp-deep));
+  width: 0%;
+  transition: width 0.6s ease;
+}
+
+#psp-app .psp-feedback-item {
+  border-left: 4px solid var(--psp-soft);
+  padding: 8px 14px;
+  margin: 10px 0;
+  background: var(--psp-pane);
+  border-radius: 0 8px 8px 0;
+}
+#psp-app .psp-feedback-item h4 {
+  margin: 0 0 4px 0; color: var(--psp-deep); font-size: 0.95rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+#psp-app .psp-feedback-item p { margin: 0; font-size: 0.95rem; }
+
+#psp-app .psp-checklist { list-style: none; padding: 0; margin: 0; }
+#psp-app .psp-checklist li {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--psp-border);
+  background: #fff;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 0.97rem;
+}
+#psp-app .psp-checklist li:hover { background: var(--psp-pane); }
+#psp-app .psp-checklist input[type=checkbox] {
+  width: 18px; height: 18px; margin-top: 2px;
+  accent-color: var(--psp-deep);
+  flex-shrink: 0;
+}
+#psp-app .psp-checklist li.done { color: var(--psp-muted); text-decoration: line-through; }
+
+#psp-app details.psp-collapsible {
+  border: 1px solid var(--psp-border);
+  border-radius: 12px;
+  padding: 0;
+  margin-bottom: 18px;
+  background: #fff;
+}
+#psp-app details.psp-collapsible > summary {
+  cursor: pointer;
+  padding: 14px 22px;
+  font-weight: 600;
+  color: var(--psp-deep);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#psp-app details.psp-collapsible > summary::-webkit-details-marker { display: none; }
+#psp-app details.psp-collapsible > summary::after {
+  content: "▾"; transition: transform 0.2s; color: var(--psp-deep);
+}
+#psp-app details.psp-collapsible[open] > summary::after { transform: rotate(180deg); }
+#psp-app details.psp-collapsible > .psp-collapsible-body {
+  padding: 0 22px 18px 22px; border-top: 1px solid var(--psp-border);
+}
+
+#psp-app .psp-field { margin-bottom: 12px; }
+#psp-app .psp-field label {
+  display: block; font-size: 0.88rem; font-weight: 600;
+  color: var(--psp-dark); margin-bottom: 4px;
+}
+#psp-app .psp-field input[type=text],
+#psp-app .psp-field input[type=url],
+#psp-app .psp-field textarea {
+  width: 100%; padding: 9px 11px;
+  border: 1px solid var(--psp-border);
+  border-radius: 6px; font-size: 0.95rem;
+  font-family: inherit; background: #fff;
+  color: var(--psp-text);
+}
+#psp-app .psp-field textarea { resize: vertical; min-height: 80px; }
+#psp-app .psp-field input:focus, #psp-app .psp-field textarea:focus {
+  outline: 2px solid var(--psp-soft); outline-offset: 1px; border-color: var(--psp-deep);
+}
+
+#psp-app .psp-limitation-note {
+  background: #fff7eb;
+  border: 1px solid #f5d3a3;
+  border-left: 4px solid var(--psp-accent);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  margin: 18px 0;
+  color: #6b4214;
+}
+
+#psp-app .psp-rec-status {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 0.9rem; color: var(--psp-muted);
+  margin-left: 8px;
+}
+#psp-app .psp-rec-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ccc; display: inline-block;
+}
+#psp-app .psp-rec-dot.recording {
+  background: var(--psp-bad);
+  animation: psp-pulse 1s infinite;
+}
+@keyframes psp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+#psp-app .psp-footer-note {
+  font-size: 0.82rem; color: var(--psp-muted);
+  text-align: center; margin-top: 24px;
+  padding-top: 14px; border-top: 1px solid var(--psp-border);
+}
+</style>
+</head>
+<body>
+
+<!-- =========================================================
+     UNIQUE WRAPPER ID: #psp-app  (all CSS is scoped to this)
+     The data-* defaults below are easy to edit for teachers.
+     ========================================================= -->
+<div id="psp-app"
+     data-default-video="https://www.w3schools.com/html/mov_bbb.mp4"
+     data-default-audio="https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/What%20was%20that.mp3"
+     data-default-phrase="What was that?"
+     data-default-title="Pronunciation Shadowing Practice — Ben Crystal on Original Pronunciation">
+
+  <!-- ===================== HEADER ===================== -->
+  <header class="psp-header">
+    <h1 id="psp-title">Pronunciation Shadowing Practice</h1>
+    <div class="psp-subtitle">
+      Listen, repeat, record, and compare your pronunciation with the original phrase.
+    </div>
+    <div>
+      Watch the video, listen to the phrase, record your own version, then
+      compare the visual acoustic patterns.
+    </div>
+    <div class="psp-note">
+      <strong>What is shadowing?</strong> Shadowing means listening to a model
+      and repeating it as closely as possible, paying attention not only to
+      individual sounds, but also to timing, rhythm, stress, and intonation.
+    </div>
+  </header>
+
+  <!-- ===================== STEP 1. VIDEO ===================== -->
+  <section class="psp-card" aria-labelledby="psp-step1-h">
+    <span class="psp-step">Step 1</span>
+    <h2 id="psp-step1-h">Watch and Listen</h2>
+    <p>Watch the short video for context and listen carefully to the target phrase.</p>
+
+    <!-- TEACHER: Replace the src of <video> below or use Teacher Settings. -->
+    <video id="psp-video" controls preload="metadata">
+      <!-- TEACHER: INSERT MOODLE VIDEO LINK HERE -->
+      <source id="psp-video-source"
+              src="https://www.w3schools.com/html/mov_bbb.mp4"
+              type="video/mp4">
+      Your browser does not support embedded HTML5 video.
+    </video>
+
+    <div class="psp-phrase-card">
+      <div style="font-size:0.78rem; color:var(--psp-muted); font-weight:600;
+                  text-transform:uppercase; letter-spacing:0.05em;
+                  font-style:normal; margin-bottom:6px;">Target phrase</div>
+      <!-- TEACHER: This text is also editable from Teacher Settings and
+                    auto-updates when a phrase is chosen from the library. -->
+      <span id="psp-phrase-text">What was that?</span>
+    </div>
+
+    <div class="psp-button-row">
+      <button class="psp-btn" id="psp-play-video">▶ Play video</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-replay-phrase">↻ Replay phrase</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-slow-mode">🐢 Slow practice mode</button>
+    </div>
+    <div id="psp-video-msg"></div>
+  </section>
+
+  <!-- ===================== PHRASE LIBRARY ===================== -->
+  <section class="psp-card" aria-labelledby="psp-library-h">
+    <span class="psp-step">Phrase Library</span>
+    <h2 id="psp-library-h">Choose a phrase from the lecture</h2>
+    <p>This activity uses phrases from the lecture
+       <em>“Ben Crystal on Original Pronunciation.”</em>
+       Select a phrase from the list below — the target phrase and the
+       original audio in Step 2 will update automatically.</p>
+    <div class="psp-field">
+      <label for="psp-phrase-select">Lecture phrase</label>
+      <select id="psp-phrase-select"
+              style="width:100%; padding:9px 11px; border:1px solid var(--psp-border);
+                     border-radius:6px; font-size:0.95rem; font-family:inherit;
+                     background:#fff; color:var(--psp-text);">
+      </select>
+    </div>
+    <div class="psp-button-row">
+      <button class="psp-btn psp-btn-secondary" id="psp-phrase-prev">← Previous phrase</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-phrase-next">Next phrase →</button>
+      <span style="margin-left:8px; color:var(--psp-muted); font-size:0.9rem;"
+            id="psp-phrase-counter"></span>
+    </div>
+  </section>
+
+  <!-- ===================== STEP 2. ORIGINAL PHRASE ===================== -->
+  <section class="psp-card" aria-labelledby="psp-step2-h">
+    <span class="psp-step">Step 2</span>
+    <h2 id="psp-step2-h">Study the Original Phrase</h2>
+    <p>Listen to the model audio of the target phrase and study its acoustic shape.</p>
+
+    <!-- TEACHER: Replace the src of <audio> below or use Teacher Settings,
+                  or simply pick a phrase from the Phrase Library above.
+                  This audio file is used for the precise acoustic comparison. -->
+    <audio id="psp-orig-audio" controls preload="auto"
+           src="https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/What%20was%20that.mp3"
+           crossorigin="anonymous">
+      <!-- TEACHER: INSERT ORIGINAL PHRASE AUDIO LINK HERE (in the src attribute above) -->
+      Your browser does not support embedded HTML5 audio.
+    </audio>
+
+    <div class="psp-button-row">
+      <button class="psp-btn" id="psp-play-orig">▶ Play Original Phrase</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-gen-orig-wave">Generate Original Waveform</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-gen-orig-spec">Generate Original Spectrogram</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-gen-orig-pitch">Generate Original Pitch Contour</button>
+    </div>
+
+    <div id="psp-orig-msg"></div>
+
+    <div class="psp-viz">
+      <div class="psp-viz-label">Original waveform <span id="psp-orig-duration" style="float:right; font-weight:400;"></span></div>
+      <div id="psp-orig-wave" class="psp-wave" aria-label="Original waveform"></div>
+      <canvas id="psp-orig-wave-fallback" class="psp-canvas" style="display:none;"
+              aria-label="Original waveform (fallback)"></canvas>
+    </div>
+    <div class="psp-viz">
+      <div class="psp-viz-label">Original amplitude envelope</div>
+      <canvas id="psp-orig-env" class="psp-canvas" aria-label="Original amplitude envelope"></canvas>
+    </div>
+    <div class="psp-viz">
+      <div class="psp-viz-label">Original spectrogram (approximate)</div>
+      <canvas id="psp-orig-spec" class="psp-canvas" style="height:160px;"
+              aria-label="Original spectrogram"></canvas>
+    </div>
+    <div class="psp-viz">
+      <div class="psp-viz-label">Original pitch contour (approximate)</div>
+      <canvas id="psp-orig-pitch" class="psp-canvas" aria-label="Original pitch contour"></canvas>
+    </div>
+  </section>
+
+  <!-- ===================== STEP 3. RECORDING ===================== -->
+  <section class="psp-card" aria-labelledby="psp-step3-h">
+    <span class="psp-step">Step 3</span>
+    <h2 id="psp-step3-h">Record Your Shadowing Attempt</h2>
+    <div class="psp-info-msg">
+      🎤 Please allow microphone access to record your voice.
+      Recording requires an HTTPS page and a compatible browser.
+    </div>
+
+    <div class="psp-button-row">
+      <button class="psp-btn psp-btn-accent" id="psp-rec-start">● Start Recording</button>
+      <button class="psp-btn psp-btn-danger" id="psp-rec-stop" disabled>■ Stop Recording</button>
+      <button class="psp-btn" id="psp-rec-play" disabled>▶ Play My Recording</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-rec-delete" disabled>🗑 Delete Recording</button>
+      <span class="psp-rec-status">
+        <span class="psp-rec-dot" id="psp-rec-dot"></span>
+        <span id="psp-rec-status-text">Idle</span>
+      </span>
+    </div>
+
+    <div class="psp-button-row">
+      <button class="psp-btn psp-btn-secondary" id="psp-gen-stu-wave" disabled>Generate My Waveform</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-gen-stu-spec" disabled>Generate My Spectrogram</button>
+      <button class="psp-btn psp-btn-secondary" id="psp-gen-stu-pitch" disabled>Generate My Pitch Contour</button>
+    </div>
+
+    <div id="psp-rec-msg"></div>
+    <audio id="psp-stu-audio" controls style="margin-top:10px; display:none;"></audio>
+
+    <div class="psp-viz">
+      <div class="psp-viz-label">My waveform <span id="psp-stu-duration" style="float:right; font-weight:400;"></span></div>
+      <div id="psp-stu-wave" class="psp-wave" aria-label="My waveform"></div>
+      <canvas id="psp-stu-wave-fallback" class="psp-canvas" style="display:none;"
+              aria-label="My waveform (fallback)"></canvas>
+    </div>
+    <div class="psp-viz">
+      <div class="psp-viz-label">My amplitude envelope</div>
+      <canvas id="psp-stu-env" class="psp-canvas" aria-label="My amplitude envelope"></canvas>
+    </div>
+    <div class="psp-viz">
+      <div class="psp-viz-label">My spectrogram (approximate)</div>
+      <canvas id="psp-stu-spec" class="psp-canvas" style="height:160px;"
+              aria-label="My spectrogram"></canvas>
+    </div>
+    <div class="psp-viz">
+      <div class="psp-viz-label">My pitch contour (approximate)</div>
+      <canvas id="psp-stu-pitch" class="psp-canvas" aria-label="My pitch contour"></canvas>
+    </div>
+  </section>
+
+  <!-- ===================== STEP 4. COMPARISON ===================== -->
+  <section class="psp-card" aria-labelledby="psp-step4-h">
+    <span class="psp-step">Step 4</span>
+    <h2 id="psp-step4-h">Compare with the Original</h2>
+    <p>Place the original and your recording side by side and look for differences
+       in length, rhythm, stress, and intonation.</p>
+
+    <div class="psp-button-row">
+      <button class="psp-btn psp-btn-accent" id="psp-compare-btn">Compare Pronunciation</button>
+    </div>
+    <div id="psp-compare-msg"></div>
+
+    <div class="psp-compare-block">
+      <h4>Original phrase — Waveform</h4>
+      <canvas id="psp-cmp-orig-wave" class="psp-canvas"></canvas>
+    </div>
+    <div class="psp-compare-block">
+      <h4>Your recording — Waveform</h4>
+      <canvas id="psp-cmp-stu-wave" class="psp-canvas"></canvas>
+    </div>
+    <div class="psp-compare-block">
+      <h4>Original phrase — Pitch contour</h4>
+      <canvas id="psp-cmp-orig-pitch" class="psp-canvas"></canvas>
+    </div>
+    <div class="psp-compare-block">
+      <h4>Your recording — Pitch contour</h4>
+      <canvas id="psp-cmp-stu-pitch" class="psp-canvas"></canvas>
+    </div>
+    <div class="psp-compare-block">
+      <h4>Original phrase — Rhythm / amplitude envelope</h4>
+      <canvas id="psp-cmp-orig-env" class="psp-canvas"></canvas>
+    </div>
+    <div class="psp-compare-block">
+      <h4>Your recording — Rhythm / amplitude envelope</h4>
+      <canvas id="psp-cmp-stu-env" class="psp-canvas"></canvas>
+    </div>
+
+    <div id="psp-score-area" style="display:none;">
+      <h3 style="margin-top:20px;">Approximate similarity indicators</h3>
+      <div class="psp-score-row">
+        <div class="psp-score-label">Duration (20%)</div>
+        <div class="psp-score-track"><div class="psp-score-fill" id="psp-sc-dur"></div></div>
+        <div class="psp-score-value" id="psp-sc-dur-v">–</div>
+      </div>
+      <div class="psp-score-row">
+        <div class="psp-score-label">Rhythm (30%)</div>
+        <div class="psp-score-track"><div class="psp-score-fill" id="psp-sc-rhy"></div></div>
+        <div class="psp-score-value" id="psp-sc-rhy-v">–</div>
+      </div>
+      <div class="psp-score-row">
+        <div class="psp-score-label">Pitch / intonation (30%)</div>
+        <div class="psp-score-track"><div class="psp-score-fill" id="psp-sc-pit"></div></div>
+        <div class="psp-score-value" id="psp-sc-pit-v">–</div>
+      </div>
+      <div class="psp-score-row">
+        <div class="psp-score-label">Pause placement (10%)</div>
+        <div class="psp-score-track"><div class="psp-score-fill" id="psp-sc-pau"></div></div>
+        <div class="psp-score-value" id="psp-sc-pau-v">–</div>
+      </div>
+      <div class="psp-score-row">
+        <div class="psp-score-label">Stress pattern (10%)</div>
+        <div class="psp-score-track"><div class="psp-score-fill" id="psp-sc-str"></div></div>
+        <div class="psp-score-value" id="psp-sc-str-v">–</div>
+      </div>
+    </div>
+
+    <div class="psp-limitation-note">
+      The overall similarity score is an <strong>approximate, pedagogical
+      indicator</strong>, not a formal phonetic assessment.
+    </div>
+  </section>
+
+  <!-- ===================== STEP 5. FEEDBACK ===================== -->
+  <section class="psp-card" aria-labelledby="psp-step5-h">
+    <span class="psp-step">Step 5</span>
+    <h2 id="psp-step5-h">Read the Feedback</h2>
+
+    <div class="psp-overall-score">
+      <div class="psp-overall-num" id="psp-overall-num">–</div>
+      <div class="psp-overall-band" id="psp-overall-band">Press “Compare Pronunciation” to see your score.</div>
+      <div class="psp-big-score-track" role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+           aria-label="Overall similarity score">
+        <div class="psp-big-score-fill" id="psp-overall-fill"></div>
+      </div>
+    </div>
+
+    <div class="psp-feedback-item">
+      <h4>Timing</h4>
+      <p id="psp-fb-timing">Record and compare to see feedback on timing.</p>
+    </div>
+    <div class="psp-feedback-item">
+      <h4>Rhythm</h4>
+      <p id="psp-fb-rhythm">Record and compare to see feedback on rhythm.</p>
+    </div>
+    <div class="psp-feedback-item">
+      <h4>Intonation</h4>
+      <p id="psp-fb-intonation">Record and compare to see feedback on intonation.</p>
+    </div>
+    <div class="psp-feedback-item">
+      <h4>Overall match</h4>
+      <p id="psp-fb-overall">Record and compare to see overall feedback.</p>
+    </div>
+
+    <div class="psp-limitation-note">
+      This automatic feedback is approximate. It can help you notice duration,
+      rhythm, stress, and general intonation differences, but it does
+      <strong>not</strong> replace teacher feedback or professional phonetic analysis.
+    </div>
+  </section>
+
+  <!-- ===================== PRACTICE CYCLE ===================== -->
+  <section class="psp-card" aria-labelledby="psp-cycle-h">
+    <h2 id="psp-cycle-h">Shadowing Practice Cycle</h2>
+    <p>Tick each step as you complete it. Your progress is saved in this browser.</p>
+    <ul class="psp-checklist" id="psp-checklist">
+      <li><input type="checkbox" data-cl="cl1"><span>Listen once without speaking.</span></li>
+      <li><input type="checkbox" data-cl="cl2"><span>Listen again and silently follow the rhythm.</span></li>
+      <li><input type="checkbox" data-cl="cl3"><span>Whisper together with the model.</span></li>
+      <li><input type="checkbox" data-cl="cl4"><span>Record your full voice.</span></li>
+      <li><input type="checkbox" data-cl="cl5"><span>Compare the patterns.</span></li>
+      <li><input type="checkbox" data-cl="cl6"><span>Repeat and improve.</span></li>
+    </ul>
+    <button class="psp-btn psp-btn-secondary" id="psp-clear-checklist"
+            style="margin-top:10px;">Reset checklist</button>
+  </section>
+
+  <!-- ===================== TEACHER SETTINGS ===================== -->
+  <details class="psp-collapsible">
+    <summary>Teacher Settings</summary>
+    <div class="psp-collapsible-body">
+      <p style="font-size:0.92rem; color:var(--psp-muted);">
+        Edit the activity content below. Settings are saved in this browser's
+        localStorage and persist across page reloads.
+      </p>
+      <div class="psp-field">
+        <label for="psp-set-title">Practice title</label>
+        <input type="text" id="psp-set-title" placeholder="Pronunciation Shadowing Practice">
+      </div>
+      <div class="psp-field">
+        <label for="psp-set-video">Video URL</label>
+        <input type="url" id="psp-set-video" placeholder="https://example.com/video.mp4">
+      </div>
+      <div class="psp-field">
+        <label for="psp-set-audio">Original phrase audio URL</label>
+        <input type="url" id="psp-set-audio" placeholder="https://example.com/phrase.mp3">
+      </div>
+      <div class="psp-field">
+        <label for="psp-set-phrase">Target phrase text</label>
+        <input type="text" id="psp-set-phrase" placeholder="I thought it would be easier than this.">
+      </div>
+      <div class="psp-field">
+        <label for="psp-set-instr">Optional instruction text</label>
+        <textarea id="psp-set-instr" placeholder="Add any extra instructions for students…"></textarea>
+      </div>
+      <div class="psp-button-row">
+        <button class="psp-btn" id="psp-set-apply">Apply Settings</button>
+        <button class="psp-btn psp-btn-secondary" id="psp-set-reset">Reset Teacher Settings</button>
+      </div>
+      <div id="psp-set-msg"></div>
+      <div id="psp-extra-instructions" style="margin-top:10px;"></div>
+    </div>
+  </details>
+
+  <!-- ===================== REFLECTION ===================== -->
+  <section class="psp-card" aria-labelledby="psp-reflection-h">
+    <h2 id="psp-reflection-h">Reflection</h2>
+    <p>Brief written reflection helps consolidate your shadowing practice.
+       Your notes are saved in this browser.</p>
+    <div class="psp-field">
+      <label for="psp-refl-1">What difference did you notice between your pronunciation and the original?</label>
+      <textarea id="psp-refl-1" placeholder="e.g. I noticed my final tone went up, while the model's stayed level…"></textarea>
+    </div>
+    <div class="psp-field">
+      <label for="psp-refl-2">What will you try to improve in the next recording?</label>
+      <textarea id="psp-refl-2" placeholder="e.g. I will slow down slightly and stress the word 'easier' more clearly…"></textarea>
+    </div>
+    <div id="psp-refl-msg" style="font-size:0.85rem; color:var(--psp-muted);">Reflections autosave as you type.</div>
+  </section>
+
+  <!-- ===================== LIMITATION NOTE ===================== -->
+  <div class="psp-limitation-note">
+    <strong>Important:</strong> Browser-based acoustic comparison is approximate.
+    It can help students notice rhythm, duration, stress, and general intonation
+    differences, but it does <strong>not</strong> replace teacher feedback or
+    professional phonetic analysis.
+  </div>
+
+  <div class="psp-footer-note">
+    Pronunciation Shadowing Practice — Moodle-ready single-file activity ·
+    Works in modern HTTPS browsers · No data leaves your browser.
+  </div>
+</div>
+<!-- /#psp-app -->
+
+<script>
+(function() {
+'use strict';
+
+/* =========================================================================
+   PRONUNCIATION SHADOWING PRACTICE - main script
+   ========================================================================= */
+
+const ROOT = document.getElementById('psp-app');
+if (!ROOT) return;
+const $ = (id) => document.getElementById(id);
+
+/* =========================================================================
+   PHRASE LIBRARY - extracted from Tab 3 "Reading phrases" of the
+   "Ben Crystal on Original Pronunciation" Moodle lecture page.
+   Each entry: { text: target phrase shown to the student,
+                 audio: URL of the original phrase audio (mp3) }
+   ========================================================================= */
+const PHRASE_LIBRARY = [
+  { text: "What was that?",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/What%20was%20that.mp3" },
+  { text: "What we can learn from it",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/What%20we%20can%20learn%20from%20it.mp3" },
+  { text: "When I was a young actor",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/When%20I%20was%20a%20young%20actor.mp3" },
+  { text: "I'd have to speak Shakespeare",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/Had%20to%20speak.mp3" },
+  { text: "First of all",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/First%20of%20all.mp3" },
+  { text: "than the clothes that you wear",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/the%20clothes.mp3" },
+  { text: "than the things that you retweet",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/things%20you%20retweet.mp3" },
+  { text: "of the sound system",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/of%20the%20sound%20system.mp3" },
+  { text: "I'll try and explain as",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/Explain.mp3?time=1740912834593" },
+  { text: "1950s Liverpool",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/1950s%20Liverpool.mp3" },
+  { text: "they'd change from street to street",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/change%20from%20street%20to%20street.mp3" },
+  { text: "modified received pronunciation",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/Modified%20RP.mp3?time=1740913303860" },
+  { text: "both what it sounds like",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/both%20what%20it%20sounds%20like.mp3" },
+  { text: "what it might remind you of",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/what%20it%20might%20remind%20you%20of.mp3" },
+  { text: "depending on whether you are speaking or listening",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/Depending%20on%20whether%20you%20are%20speaking%20or%20listening.mp3" },
+  { text: "The accent that I am speaking",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/The%20accent%20that%20I%20am%20speaking.mp3" },
+  { text: "It's your identity",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/Its%20your%20identity.mp3" },
+  { text: "it's who you are",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/it%E2%80%99s%20who%20you%20are.mp3" },
+  { text: "you get beaten up",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/you%20get%20beaten%20up.mp3" },
+  { text: "over the next forty minutes or so",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/over%20the%20next%20forty%20minutes%20or%20so.mp3" },
+  { text: "or the aural",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/or%20the%20aural.mp3" },
+  { text: "my identity",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/my%20identity.mp3" },
+  { text: "As a marker of identity",
+    audio: "https://newlms.misis.ru/draftfile.php/2862/user/draft/436545644/As%20a%20marker%20of%20identity.mp3" }
+];
+
+const LS_PREFIX = 'pspShadowing.v1.';
+const lsGet = (k, d) => { try { const v = localStorage.getItem(LS_PREFIX + k); return v === null ? d : v; } catch (_) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(LS_PREFIX + k, v); } catch (_) {} };
+const lsDel = (k)    => { try { localStorage.removeItem(LS_PREFIX + k); } catch (_) {} };
+
+// Library availability flags
+const HAS_WAVESURFER = (typeof WaveSurfer !== 'undefined');
+const HAS_CHARTJS    = (typeof Chart      !== 'undefined');
+// Pitchy is loaded asynchronously; we re-check at use time.
+function hasPitchy() { return !!(window.PSP_Pitchy && window.PSP_Pitchy.PitchDetector); }
+
+// ----------- Utility: messages -----------
+function showMsg(containerId, text, type) {
+  const cls = type === 'error' ? 'psp-error-msg'
+            : type === 'success' ? 'psp-success-msg'
+            : 'psp-info-msg';
+  const c = $(containerId);
+  if (!c) return;
+  c.innerHTML = '<div class="' + cls + '">' + text + '</div>';
+}
+function clearMsg(containerId) { const c = $(containerId); if (c) c.innerHTML = ''; }
+
+// =========================================================================
+// AUDIO DECODING + ANALYSIS HELPERS (Web Audio API)
+// =========================================================================
+let _audioCtx = null;
+function audioCtx() {
+  if (!_audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio API not supported in this browser.');
+    _audioCtx = new AC();
+  }
+  return _audioCtx;
+}
+
+async function fetchAudioBuffer(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('Could not load audio (' + resp.status + ').');
+  const buf = await resp.arrayBuffer();
+  return await audioCtx().decodeAudioData(buf);
+}
+async function blobToAudioBuffer(blob) {
+  const buf = await blob.arrayBuffer();
+  return await audioCtx().decodeAudioData(buf);
+}
+
+// Mix down to mono Float32 array
+function toMono(audioBuffer) {
+  const ch = audioBuffer.numberOfChannels;
+  const len = audioBuffer.length;
+  const out = new Float32Array(len);
+  for (let c = 0; c < ch; c++) {
+    const d = audioBuffer.getChannelData(c);
+    for (let i = 0; i < len; i++) out[i] += d[i];
+  }
+  if (ch > 1) for (let i = 0; i < len; i++) out[i] /= ch;
+  return out;
+}
+
+// Amplitude envelope (RMS in windows). Returns Float32Array of N values.
+function amplitudeEnvelope(samples, sampleRate, frames) {
+  frames = frames || 200;
+  const win = Math.max(1, Math.floor(samples.length / frames));
+  const out = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    const start = i * win;
+    const end = Math.min(samples.length, start + win);
+    let s = 0;
+    for (let j = start; j < end; j++) s += samples[j] * samples[j];
+    out[i] = Math.sqrt(s / Math.max(1, end - start));
+  }
+  return out;
+}
+
+// Approximate pitch contour (Hz per frame, 0 = unvoiced).
+// Uses Pitchy if available, else simple autocorrelation.
+function pitchContour(samples, sampleRate, hopMs) {
+  hopMs = hopMs || 25;
+  const winSize = 2048;
+  const hop = Math.max(1, Math.floor(sampleRate * hopMs / 1000));
+  const nFrames = Math.max(1, Math.floor((samples.length - winSize) / hop));
+  const out = new Float32Array(nFrames);
+
+  let detector = null;
+  if (hasPitchy()) {
+    try {
+      detector = window.PSP_Pitchy.PitchDetector.forFloat32Array(winSize);
+    } catch (e) { detector = null; }
+  }
+
+  const frame = new Float32Array(winSize);
+  for (let i = 0; i < nFrames; i++) {
+    const start = i * hop;
+    for (let j = 0; j < winSize; j++) frame[j] = samples[start + j] || 0;
+
+    // RMS gate to detect voiced frames
+    let rms = 0;
+    for (let j = 0; j < winSize; j++) rms += frame[j] * frame[j];
+    rms = Math.sqrt(rms / winSize);
+    if (rms < 0.01) { out[i] = 0; continue; }
+
+    if (detector) {
+      try {
+        const [pitch, clarity] = detector.findPitch(frame, sampleRate);
+        if (clarity > 0.85 && pitch > 60 && pitch < 600) out[i] = pitch;
+        else out[i] = 0;
+      } catch (_) {
+        out[i] = simpleAutocorrPitch(frame, sampleRate);
+      }
+    } else {
+      out[i] = simpleAutocorrPitch(frame, sampleRate);
+    }
+  }
+  return out;
+}
+
+// Fallback pitch detection via autocorrelation.
+function simpleAutocorrPitch(frame, sampleRate) {
+  const SIZE = frame.length;
+  // Normalise
+  let mean = 0;
+  for (let i = 0; i < SIZE; i++) mean += frame[i];
+  mean /= SIZE;
+  const buf = new Float32Array(SIZE);
+  for (let i = 0; i < SIZE; i++) buf[i] = frame[i] - mean;
+
+  const minLag = Math.floor(sampleRate / 500); // 500 Hz max
+  const maxLag = Math.floor(sampleRate / 70);  // 70 Hz min
+  let bestLag = -1, bestCorr = 0;
+  for (let lag = minLag; lag < maxLag; lag++) {
+    let corr = 0;
+    for (let i = 0; i < SIZE - lag; i++) corr += buf[i] * buf[i + lag];
+    if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+  }
+  if (bestLag <= 0) return 0;
+  let energy = 0;
+  for (let i = 0; i < SIZE; i++) energy += buf[i] * buf[i];
+  const normCorr = bestCorr / (energy || 1);
+  if (normCorr < 0.3) return 0;
+  return sampleRate / bestLag;
+}
+
+// =========================================================================
+// CANVAS DRAWING HELPERS (waveform, envelope, spectrogram, pitch)
+// =========================================================================
+function setupHiDpiCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+function drawWaveform(canvas, samples, color) {
+  if (!canvas) return;
+  const { ctx, w, h } = setupHiDpiCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#D6E2EA';
+  ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+
+  if (!samples || samples.length === 0) return;
+  const step = Math.max(1, Math.floor(samples.length / w));
+  ctx.fillStyle = color || '#377490';
+  for (let x = 0; x < w; x++) {
+    const start = x * step;
+    const end = Math.min(samples.length, start + step);
+    let min = 1, max = -1;
+    for (let i = start; i < end; i++) {
+      const v = samples[i];
+      if (v < min) min = v; if (v > max) max = v;
+    }
+    const y1 = (1 - max) * h / 2;
+    const y2 = (1 - min) * h / 2;
+    ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+  }
+}
+
+function drawEnvelope(canvas, env, color) {
+  if (!canvas) return;
+  const { ctx, w, h } = setupHiDpiCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  if (!env || env.length === 0) return;
+  let max = 0;
+  for (let i = 0; i < env.length; i++) if (env[i] > max) max = env[i];
+  max = max || 1;
+  ctx.fillStyle = (color || '#377490') + '33';
+  ctx.strokeStyle = color || '#377490';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  for (let i = 0; i < env.length; i++) {
+    const x = (i / (env.length - 1)) * w;
+    const y = h - (env[i] / max) * (h * 0.9);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(w, h); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+}
+
+function drawPitchContour(canvas, pitches, color) {
+  if (!canvas) return;
+  const { ctx, w, h } = setupHiDpiCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+
+  // grid lines for 100, 200, 300, 400 Hz
+  ctx.strokeStyle = '#EEF4F8'; ctx.lineWidth = 1;
+  ctx.fillStyle = '#9aa6ad'; ctx.font = '10px sans-serif';
+  const minF = 70, maxF = 400;
+  [100, 150, 200, 250, 300, 350].forEach(f => {
+    const y = h - ((f - minF) / (maxF - minF)) * h;
+    ctx.beginPath(); ctx.moveTo(30, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.fillText(f + ' Hz', 2, y + 3);
+  });
+
+  if (!pitches || pitches.length === 0) return;
+
+  ctx.fillStyle = color || '#377490';
+  for (let i = 0; i < pitches.length; i++) {
+    const p = pitches[i];
+    if (p <= 0) continue;
+    const x = 30 + (i / (pitches.length - 1)) * (w - 30);
+    const yClamp = Math.min(maxF, Math.max(minF, p));
+    const y = h - ((yClamp - minF) / (maxF - minF)) * h;
+    ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// Approximate spectrogram via short-time FFT (using AnalyserNode-like calc).
+// Simple magnitude-based FFT using OfflineAudioContext to leverage AnalyserNode.
+async function drawSpectrogram(canvas, samples, sampleRate) {
+  if (!canvas) return;
+  const { ctx, w, h } = setupHiDpiCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+  if (!samples || samples.length === 0) return;
+
+  // Build offline context to run an AnalyserNode through the signal.
+  const fftSize = 512;
+  const hop = Math.max(1, Math.floor(samples.length / Math.max(120, Math.floor(w))));
+  const nFrames = Math.floor((samples.length - fftSize) / hop);
+  if (nFrames < 2) return;
+
+  // Pre-compute Hann window
+  const win = new Float32Array(fftSize);
+  for (let i = 0; i < fftSize; i++) {
+    win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (fftSize - 1));
+  }
+  const re = new Float32Array(fftSize);
+  const im = new Float32Array(fftSize);
+
+  // Tiny DFT (slow but acceptable for short phrases)
+  function dft(input) {
+    const N = fftSize;
+    for (let k = 0; k < N / 2; k++) {
+      let sr = 0, si = 0;
+      for (let n = 0; n < N; n++) {
+        const ang = -2 * Math.PI * k * n / N;
+        sr += input[n] * Math.cos(ang);
+        si += input[n] * Math.sin(ang);
+      }
+      re[k] = sr; im[k] = si;
+    }
+  }
+
+  // To keep this fast and avoid slow O(N^2) DFT for many frames, downsample
+  // to a coarser frame count if needed.
+  const maxFrames = Math.min(nFrames, 120);
+  const frameStep = Math.max(1, Math.floor(nFrames / maxFrames));
+  const bins = fftSize / 2;
+  const matrix = new Float32Array(maxFrames * bins);
+  const wf = new Float32Array(fftSize);
+
+  for (let f = 0; f < maxFrames; f++) {
+    const start = f * frameStep * hop;
+    for (let i = 0; i < fftSize; i++) wf[i] = (samples[start + i] || 0) * win[i];
+    dft(wf);
+    for (let k = 0; k < bins; k++) {
+      const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      matrix[f * bins + k] = mag;
+    }
+  }
+
+  // Find max for normalisation
+  let mx = 0;
+  for (let i = 0; i < matrix.length; i++) if (matrix[i] > mx) mx = matrix[i];
+  mx = mx || 1;
+
+  const cellW = w / maxFrames;
+  // Show only lower 3 kHz approx
+  const nyq = sampleRate / 2;
+  const maxBin = Math.min(bins, Math.floor((3000 / nyq) * bins));
+  const cellH = h / maxBin;
+
+  for (let f = 0; f < maxFrames; f++) {
+    for (let k = 0; k < maxBin; k++) {
+      const v = matrix[f * bins + k] / mx;
+      const db = Math.max(0, 1 + Math.log10(v + 1e-6) / 3); // ~ -60 dB floor
+      const c = Math.min(1, db);
+      // Color ramp: dark -> teal -> orange-yellow (viridis-ish)
+      const r = Math.round(255 * Math.min(1, c * 1.2));
+      const g = Math.round(180 * c + 40 * c);
+      const b = Math.round(200 * (1 - c) + 60 * c);
+      ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+      ctx.fillRect(f * cellW, h - (k + 1) * cellH, cellW + 0.5, cellH + 0.5);
+    }
+  }
+}
+
+// =========================================================================
+// COMPARISON METRICS
+// =========================================================================
+
+// Resample 1D array to a fixed length using linear interpolation
+function resample(arr, n) {
+  if (!arr || arr.length === 0) return new Float32Array(n);
+  if (arr.length === n) return arr.slice();
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = (i / (n - 1)) * (arr.length - 1);
+    const i0 = Math.floor(t), i1 = Math.min(arr.length - 1, i0 + 1);
+    const frac = t - i0;
+    out[i] = arr[i0] * (1 - frac) + arr[i1] * frac;
+  }
+  return out;
+}
+function normalise(arr) {
+  let max = 0;
+  for (let i = 0; i < arr.length; i++) if (Math.abs(arr[i]) > max) max = Math.abs(arr[i]);
+  if (max === 0) return arr.slice();
+  const out = new Float32Array(arr.length);
+  for (let i = 0; i < arr.length; i++) out[i] = arr[i] / max;
+  return out;
+}
+function pearson(a, b) {
+  const n = a.length;
+  let ma = 0, mb = 0;
+  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+  ma /= n; mb /= n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const xa = a[i] - ma, xb = b[i] - mb;
+    num += xa * xb; da += xa * xa; db += xb * xb;
+  }
+  const den = Math.sqrt(da * db);
+  return den === 0 ? 0 : num / den;
+}
+
+// Map a correlation in [-1, 1] to a 0..100 score (negative -> 0)
+function corrToScore(r) {
+  const c = Math.max(0, r);
+  return Math.round(c * 100);
+}
+
+// Duration similarity: ratio of shorter / longer
+function durationScore(d1, d2) {
+  if (!d1 || !d2) return 0;
+  return Math.round((Math.min(d1, d2) / Math.max(d1, d2)) * 100);
+}
+
+// Pause placement similarity: identify low-amplitude regions in envelope, compare
+function pauseScore(env1, env2, n) {
+  n = n || 100;
+  const e1 = resample(env1, n);
+  const e2 = resample(env2, n);
+  const max1 = Math.max(...e1) || 1, max2 = Math.max(...e2) || 1;
+  const thr = 0.2;
+  let agree = 0;
+  for (let i = 0; i < n; i++) {
+    const p1 = e1[i] / max1 < thr;
+    const p2 = e2[i] / max2 < thr;
+    if (p1 === p2) agree++;
+  }
+  return Math.round((agree / n) * 100);
+}
+
+// Stress pattern similarity: find peaks in envelope, compare relative positions
+function stressScore(env1, env2, n) {
+  n = n || 100;
+  const e1 = resample(env1, n);
+  const e2 = resample(env2, n);
+  // Identify top-N peaks as binary mask
+  function peaks(e) {
+    const m = Math.max(...e) || 1;
+    const mask = new Uint8Array(n);
+    for (let i = 1; i < n - 1; i++) {
+      if (e[i] > e[i - 1] && e[i] > e[i + 1] && e[i] / m > 0.5) mask[i] = 1;
+    }
+    return mask;
+  }
+  const p1 = peaks(e1), p2 = peaks(e2);
+  // For each peak in 1, look for any peak in 2 within +/-10% window
+  let total = 0, matched = 0;
+  for (let i = 0; i < n; i++) {
+    if (p1[i]) {
+      total++;
+      const lo = Math.max(0, i - 8), hi = Math.min(n - 1, i + 8);
+      for (let j = lo; j <= hi; j++) if (p2[j]) { matched++; break; }
+    }
+  }
+  if (total === 0) return 50; // not enough info
+  return Math.round((matched / total) * 100);
+}
+
+// Pitch contour similarity: compare normalised pitch shape ignoring absolute Hz
+function pitchSimilarity(p1, p2, n) {
+  n = n || 100;
+  // Fill unvoiced (0) by linear interpolation between voiced points
+  function fill(p) {
+    const out = Array.from(p);
+    let lastIdx = -1, lastVal = 0;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i] > 0) { lastVal = out[i]; lastIdx = i; break; }
+    }
+    if (lastIdx < 0) return new Float32Array(out.length); // all zero
+    for (let i = 0; i < lastIdx; i++) out[i] = lastVal;
+    for (let i = lastIdx + 1; i < out.length; i++) {
+      if (out[i] === 0) {
+        let nextIdx = -1, nextVal = lastVal;
+        for (let j = i + 1; j < out.length; j++) if (out[j] > 0) { nextIdx = j; nextVal = out[j]; break; }
+        if (nextIdx < 0) {
+          for (let j = i; j < out.length; j++) out[j] = lastVal;
+          break;
+        }
+        const span = nextIdx - lastIdx;
+        for (let j = lastIdx + 1; j < nextIdx; j++) {
+          const t = (j - lastIdx) / span;
+          out[j] = lastVal * (1 - t) + nextVal * t;
+        }
+        i = nextIdx; lastIdx = nextIdx; lastVal = nextVal;
+      } else {
+        lastIdx = i; lastVal = out[i];
+      }
+    }
+    return new Float32Array(out);
+  }
+  const f1 = fill(p1), f2 = fill(p2);
+  if (f1.every(v => v === 0) || f2.every(v => v === 0)) return 0;
+  const r1 = resample(f1, n), r2 = resample(f2, n);
+  // Convert to log scale (semitone-like) and normalise around mean
+  function logNorm(arr) {
+    const out = new Float32Array(arr.length);
+    let mean = 0, cnt = 0;
+    for (let i = 0; i < arr.length; i++) if (arr[i] > 0) { mean += Math.log2(arr[i]); cnt++; }
+    if (cnt === 0) return out;
+    mean /= cnt;
+    for (let i = 0; i < arr.length; i++) out[i] = arr[i] > 0 ? (Math.log2(arr[i]) - mean) * 12 : 0;
+    return out;
+  }
+  const ln1 = logNorm(r1), ln2 = logNorm(r2);
+  const r = pearson(ln1, ln2);
+  return corrToScore(r);
+}
+
+// =========================================================================
+// STATE
+// =========================================================================
+const STATE = {
+  origBuffer: null,
+  origSamples: null,
+  origEnv: null,
+  origPitch: null,
+  stuBuffer: null,
+  stuSamples: null,
+  stuEnv: null,
+  stuPitch: null,
+  recBlob: null,
+  recObjectUrl: null,
+  mediaRecorder: null,
+  recordedChunks: [],
+  origWS: null,
+  stuWS: null,
+  slowMode: false
+};
+
+// =========================================================================
+// WAVESURFER HELPERS (with fallback)
+// =========================================================================
+function makeWavesurfer(containerId, color) {
+  if (!HAS_WAVESURFER) return null;
+  try {
+    return WaveSurfer.create({
+      container: '#' + containerId,
+      waveColor: color || '#65A9B4',
+      progressColor: '#377490',
+      cursorColor: '#1D2125',
+      height: 80,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 1,
+      normalize: true
+    });
+  } catch (e) {
+    console.warn('Wavesurfer create failed', e);
+    return null;
+  }
+}
+
+// =========================================================================
+// STEP 1 - VIDEO CONTROLS
+// =========================================================================
+const video = $('psp-video');
+$('psp-play-video').addEventListener('click', () => {
+  try { video.currentTime = 0; video.play(); }
+  catch (e) { showMsg('psp-video-msg', 'Could not play video: ' + e.message, 'error'); }
+});
+$('psp-replay-phrase').addEventListener('click', () => {
+  // For now this replays the original audio (precise phrase clip).
+  const a = $('psp-orig-audio');
+  try { a.currentTime = 0; a.play(); }
+  catch (e) { showMsg('psp-video-msg', 'Could not play original phrase audio.', 'error'); }
+});
+$('psp-slow-mode').addEventListener('click', () => {
+  STATE.slowMode = !STATE.slowMode;
+  const rate = STATE.slowMode ? 0.7 : 1.0;
+  video.playbackRate = rate;
+  $('psp-orig-audio').playbackRate = rate;
+  showMsg('psp-video-msg',
+    STATE.slowMode ? 'Slow practice mode ON (0.7×). Click again to turn off.'
+                   : 'Normal speed (1.0×).',
+    'info');
+});
+video.addEventListener('error', () => {
+  showMsg('psp-video-msg',
+    'The video file could not be loaded. Please ask your teacher to update the video URL.',
+    'error');
+});
+
+// =========================================================================
+// STEP 2 - ORIGINAL PHRASE
+// =========================================================================
+const origAudio = $('psp-orig-audio');
+
+origAudio.addEventListener('error', () => {
+  showMsg('psp-orig-msg',
+    'The original phrase audio could not be loaded. Please check the audio URL in Teacher Settings.',
+    'error');
+});
+
+$('psp-play-orig').addEventListener('click', () => {
+  try { origAudio.currentTime = 0; origAudio.play(); }
+  catch (e) { showMsg('psp-orig-msg', 'Could not play audio: ' + e.message, 'error'); }
+});
+
+async function loadOriginalBuffer() {
+  if (STATE.origBuffer) return STATE.origBuffer;
+  const url = origAudio.getAttribute('src');
+  if (!url) throw new Error('No audio URL set.');
+  try {
+    STATE.origBuffer = await fetchAudioBuffer(url);
+    STATE.origSamples = toMono(STATE.origBuffer);
+    return STATE.origBuffer;
+  } catch (e) {
+    throw new Error('Could not decode original audio. ' +
+      'This may be because the audio URL is missing, the file is not a supported format, ' +
+      'or CORS is blocking the request. Original error: ' + e.message);
+  }
+}
+
+$('psp-gen-orig-wave').addEventListener('click', async () => {
+  clearMsg('psp-orig-msg');
+  try {
+    await loadOriginalBuffer();
+    $('psp-orig-duration').textContent =
+      'Duration: ' + STATE.origBuffer.duration.toFixed(2) + ' s';
+
+    if (HAS_WAVESURFER) {
+      $('psp-orig-wave-fallback').style.display = 'none';
+      $('psp-orig-wave').style.display = '';
+      if (!STATE.origWS) STATE.origWS = makeWavesurfer('psp-orig-wave');
+      if (STATE.origWS) {
+        STATE.origWS.load(origAudio.getAttribute('src'));
+      } else {
+        $('psp-orig-wave').style.display = 'none';
+        $('psp-orig-wave-fallback').style.display = '';
+        drawWaveform($('psp-orig-wave-fallback'), STATE.origSamples, '#377490');
+      }
+    } else {
+      $('psp-orig-wave').style.display = 'none';
+      $('psp-orig-wave-fallback').style.display = '';
+      drawWaveform($('psp-orig-wave-fallback'), STATE.origSamples, '#377490');
+    }
+    STATE.origEnv = amplitudeEnvelope(STATE.origSamples, STATE.origBuffer.sampleRate, 250);
+    drawEnvelope($('psp-orig-env'), STATE.origEnv, '#377490');
+  } catch (e) {
+    showMsg('psp-orig-msg', e.message, 'error');
+  }
+});
+
+$('psp-gen-orig-spec').addEventListener('click', async () => {
+  clearMsg('psp-orig-msg');
+  try {
+    await loadOriginalBuffer();
+    await drawSpectrogram($('psp-orig-spec'), STATE.origSamples, STATE.origBuffer.sampleRate);
+  } catch (e) {
+    showMsg('psp-orig-msg', e.message, 'error');
+  }
+});
+
+$('psp-gen-orig-pitch').addEventListener('click', async () => {
+  clearMsg('psp-orig-msg');
+  try {
+    await loadOriginalBuffer();
+    STATE.origPitch = pitchContour(STATE.origSamples, STATE.origBuffer.sampleRate, 25);
+    drawPitchContour($('psp-orig-pitch'), STATE.origPitch, '#377490');
+    if (!hasPitchy()) {
+      showMsg('psp-orig-msg',
+        'Note: Advanced pitch library not loaded — using built-in autocorrelation fallback.',
+        'info');
+    }
+  } catch (e) {
+    showMsg('psp-orig-msg', e.message, 'error');
+  }
+});
+
+// =========================================================================
+// STEP 3 - RECORDING
+// =========================================================================
+const stuAudio = $('psp-stu-audio');
+const recStart = $('psp-rec-start');
+const recStop  = $('psp-rec-stop');
+const recPlay  = $('psp-rec-play');
+const recDel   = $('psp-rec-delete');
+const recDot   = $('psp-rec-dot');
+const recText  = $('psp-rec-status-text');
+
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia ||
+    typeof MediaRecorder === 'undefined') {
+  showMsg('psp-rec-msg',
+    'Your browser does not support microphone recording (MediaRecorder API). ' +
+    'Please use a recent version of Chrome, Firefox, Edge or Safari over HTTPS.',
+    'error');
+  recStart.disabled = true;
+}
+
+recStart.addEventListener('click', async () => {
+  clearMsg('psp-rec-msg');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    let mr;
+    try { mr = new MediaRecorder(stream); }
+    catch (e) {
+      try { mr = new MediaRecorder(stream, { mimeType: 'audio/webm' }); }
+      catch (e2) { throw new Error('MediaRecorder is not available in this browser.'); }
+    }
+    STATE.mediaRecorder = mr;
+    STATE.recordedChunks = [];
+    mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) STATE.recordedChunks.push(ev.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const type = (STATE.recordedChunks[0] && STATE.recordedChunks[0].type) || 'audio/webm';
+      STATE.recBlob = new Blob(STATE.recordedChunks, { type });
+      if (STATE.recObjectUrl) URL.revokeObjectURL(STATE.recObjectUrl);
+      STATE.recObjectUrl = URL.createObjectURL(STATE.recBlob);
+      stuAudio.src = STATE.recObjectUrl;
+      stuAudio.style.display = '';
+      recPlay.disabled = false;
+      recDel.disabled = false;
+      $('psp-gen-stu-wave').disabled = false;
+      $('psp-gen-stu-spec').disabled = false;
+      $('psp-gen-stu-pitch').disabled = false;
+      // Decode for analysis
+      blobToAudioBuffer(STATE.recBlob).then(buf => {
+        STATE.stuBuffer = buf;
+        STATE.stuSamples = toMono(buf);
+        $('psp-stu-duration').textContent =
+          'Duration: ' + buf.duration.toFixed(2) + ' s';
+        showMsg('psp-rec-msg',
+          'Recording saved. Click the “Generate My …” buttons to visualise your audio.',
+          'success');
+      }).catch(e => {
+        showMsg('psp-rec-msg', 'Could not decode your recording: ' + e.message, 'error');
+      });
+      recText.textContent = 'Idle';
+      recDot.classList.remove('recording');
+    };
+    mr.start();
+    recDot.classList.add('recording');
+    recText.textContent = 'Recording…';
+    recStart.disabled = true;
+    recStop.disabled  = false;
+  } catch (e) {
+    showMsg('psp-rec-msg',
+      'Microphone access was denied or unavailable. ' +
+      'Please grant microphone permission and ensure the page is loaded over HTTPS. ' +
+      'Original error: ' + (e.message || e.name),
+      'error');
+    recStart.disabled = false;
+    recStop.disabled  = true;
+  }
+});
+
+recStop.addEventListener('click', () => {
+  try {
+    STATE.mediaRecorder && STATE.mediaRecorder.stop();
+  } catch (_) {}
+  recStart.disabled = false;
+  recStop.disabled  = true;
+});
+
+recPlay.addEventListener('click', () => {
+  try { stuAudio.currentTime = 0; stuAudio.play(); } catch (_) {}
+});
+
+recDel.addEventListener('click', () => {
+  STATE.recBlob = null;
+  STATE.stuBuffer = null;
+  STATE.stuSamples = null;
+  STATE.stuEnv = null;
+  STATE.stuPitch = null;
+  if (STATE.recObjectUrl) URL.revokeObjectURL(STATE.recObjectUrl);
+  STATE.recObjectUrl = null;
+  stuAudio.removeAttribute('src');
+  stuAudio.style.display = 'none';
+  recPlay.disabled = true;
+  recDel.disabled = true;
+  $('psp-gen-stu-wave').disabled = true;
+  $('psp-gen-stu-spec').disabled = true;
+  $('psp-gen-stu-pitch').disabled = true;
+  $('psp-stu-duration').textContent = '';
+  // Clear visualisations
+  ['psp-stu-wave-fallback', 'psp-stu-env', 'psp-stu-spec', 'psp-stu-pitch'].forEach(id => {
+    const c = $(id);
+    if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+  });
+  if (STATE.stuWS) {
+    try { STATE.stuWS.empty(); } catch (_) {}
+  }
+  showMsg('psp-rec-msg', 'Your recording has been deleted.', 'info');
+});
+
+$('psp-gen-stu-wave').addEventListener('click', () => {
+  if (!STATE.stuSamples) {
+    showMsg('psp-rec-msg', 'No recording available yet.', 'error');
+    return;
+  }
+  if (HAS_WAVESURFER) {
+    $('psp-stu-wave-fallback').style.display = 'none';
+    $('psp-stu-wave').style.display = '';
+    if (!STATE.stuWS) STATE.stuWS = makeWavesurfer('psp-stu-wave', '#F5851C');
+    if (STATE.stuWS && STATE.recObjectUrl) {
+      STATE.stuWS.load(STATE.recObjectUrl);
+    } else {
+      $('psp-stu-wave').style.display = 'none';
+      $('psp-stu-wave-fallback').style.display = '';
+      drawWaveform($('psp-stu-wave-fallback'), STATE.stuSamples, '#F5851C');
+    }
+  } else {
+    $('psp-stu-wave').style.display = 'none';
+    $('psp-stu-wave-fallback').style.display = '';
+    drawWaveform($('psp-stu-wave-fallback'), STATE.stuSamples, '#F5851C');
+  }
+  STATE.stuEnv = amplitudeEnvelope(STATE.stuSamples, STATE.stuBuffer.sampleRate, 250);
+  drawEnvelope($('psp-stu-env'), STATE.stuEnv, '#F5851C');
+});
+
+$('psp-gen-stu-spec').addEventListener('click', async () => {
+  if (!STATE.stuSamples) {
+    showMsg('psp-rec-msg', 'No recording available yet.', 'error');
+    return;
+  }
+  await drawSpectrogram($('psp-stu-spec'), STATE.stuSamples, STATE.stuBuffer.sampleRate);
+});
+
+$('psp-gen-stu-pitch').addEventListener('click', () => {
+  if (!STATE.stuSamples) {
+    showMsg('psp-rec-msg', 'No recording available yet.', 'error');
+    return;
+  }
+  STATE.stuPitch = pitchContour(STATE.stuSamples, STATE.stuBuffer.sampleRate, 25);
+  drawPitchContour($('psp-stu-pitch'), STATE.stuPitch, '#F5851C');
+});
+
+// =========================================================================
+// STEP 4 - COMPARISON
+// =========================================================================
+$('psp-compare-btn').addEventListener('click', async () => {
+  clearMsg('psp-compare-msg');
+  try {
+    await loadOriginalBuffer();
+    if (!STATE.origEnv) {
+      STATE.origEnv = amplitudeEnvelope(STATE.origSamples, STATE.origBuffer.sampleRate, 250);
+    }
+    if (!STATE.origPitch) {
+      STATE.origPitch = pitchContour(STATE.origSamples, STATE.origBuffer.sampleRate, 25);
+    }
+    if (!STATE.stuSamples) {
+      showMsg('psp-compare-msg',
+        'Please record your version first (Step 3) before comparing.', 'error');
+      return;
+    }
+    if (!STATE.stuEnv) {
+      STATE.stuEnv = amplitudeEnvelope(STATE.stuSamples, STATE.stuBuffer.sampleRate, 250);
+    }
+    if (!STATE.stuPitch) {
+      STATE.stuPitch = pitchContour(STATE.stuSamples, STATE.stuBuffer.sampleRate, 25);
+    }
+
+    // Draw side-by-side panels
+    drawWaveform($('psp-cmp-orig-wave'), STATE.origSamples, '#377490');
+    drawWaveform($('psp-cmp-stu-wave'),  STATE.stuSamples,  '#F5851C');
+    drawPitchContour($('psp-cmp-orig-pitch'), STATE.origPitch, '#377490');
+    drawPitchContour($('psp-cmp-stu-pitch'),  STATE.stuPitch,  '#F5851C');
+    drawEnvelope($('psp-cmp-orig-env'), STATE.origEnv, '#377490');
+    drawEnvelope($('psp-cmp-stu-env'),  STATE.stuEnv,  '#F5851C');
+
+    // Compute scores
+    const N = 200;
+    const oEnvN = normalise(resample(STATE.origEnv, N));
+    const sEnvN = normalise(resample(STATE.stuEnv, N));
+
+    const sDur = durationScore(STATE.origBuffer.duration, STATE.stuBuffer.duration);
+    const sRhy = corrToScore(pearson(oEnvN, sEnvN));
+    const sPit = pitchSimilarity(STATE.origPitch, STATE.stuPitch, N);
+    const sPau = pauseScore(STATE.origEnv, STATE.stuEnv, N);
+    const sStr = stressScore(STATE.origEnv, STATE.stuEnv, N);
+
+    const overall = Math.round(
+      sDur * 0.20 + sRhy * 0.30 + sPit * 0.30 + sPau * 0.10 + sStr * 0.10
+    );
+
+    // Update score bars
+    function set(id, v) {
+      $(id).style.width = v + '%';
+      $(id + '-v').textContent = v;
+    }
+    $('psp-score-area').style.display = '';
+    set('psp-sc-dur', sDur);
+    set('psp-sc-rhy', sRhy);
+    set('psp-sc-pit', sPit);
+    set('psp-sc-pau', sPau);
+    set('psp-sc-str', sStr);
+
+    $('psp-overall-num').textContent = overall;
+    $('psp-overall-fill').style.width = overall + '%';
+    const track = $('psp-overall-fill').parentElement;
+    track.setAttribute('aria-valuenow', String(overall));
+
+    let band;
+    if (overall >= 85) band = 'Very close shadowing';
+    else if (overall >= 70) band = 'Good approximation';
+    else if (overall >= 50) band = 'Partly similar — needs more controlled repetition';
+    else band = 'Try again with slower listening and shorter chunks';
+    $('psp-overall-band').textContent = band + ' (' + overall + '/100)';
+
+    // Feedback messages
+    $('psp-fb-timing').textContent = timingFeedback(
+      STATE.origBuffer.duration, STATE.stuBuffer.duration, sDur);
+    $('psp-fb-rhythm').textContent = rhythmFeedback(sRhy, sStr);
+    $('psp-fb-intonation').textContent = intonationFeedback(sPit, STATE.origPitch, STATE.stuPitch);
+    $('psp-fb-overall').textContent = overallFeedback(overall);
+
+    showMsg('psp-compare-msg',
+      'Comparison complete. See Step 5 for feedback.', 'success');
+  } catch (e) {
+    showMsg('psp-compare-msg', e.message, 'error');
+  }
+});
+
+function timingFeedback(o, s, score) {
+  const diff = s - o;
+  if (Math.abs(diff) < 0.15) {
+    return 'Your timing is very close to the original (' +
+           s.toFixed(2) + ' s vs ' + o.toFixed(2) + ' s). Good control of pace.';
+  }
+  if (diff < 0) {
+    return 'Your recording is shorter than the original (' +
+           s.toFixed(2) + ' s vs ' + o.toFixed(2) + ' s). Try not to rush the phrase ' +
+           'and keep stressed syllables long enough.';
+  }
+  return 'Your recording is longer than the original (' +
+         s.toFixed(2) + ' s vs ' + o.toFixed(2) + ' s). Try to keep up with the model ' +
+         'and reduce hesitations between words.';
+}
+function rhythmFeedback(sRhy, sStr) {
+  if (sRhy >= 75 && sStr >= 70) {
+    return 'The rhythm pattern matches the model closely, and your stressed parts ' +
+           'fall in similar positions.';
+  }
+  if (sRhy >= 50) {
+    return 'The rhythm pattern is partly similar, but some stressed parts are weaker ' +
+           'or shifted compared to the original.';
+  }
+  return 'The rhythm pattern differs noticeably from the original. ' +
+         'Listen for the strong and weak beats and try to mirror them.';
+}
+function intonationFeedback(sPit, oPitch, sPitch) {
+  // Inspect final-tone direction
+  function trend(p) {
+    const tail = [];
+    for (let i = p.length - 1; i >= 0 && tail.length < 10; i--) if (p[i] > 0) tail.unshift(p[i]);
+    if (tail.length < 2) return 'level';
+    const diff = tail[tail.length - 1] - tail[0];
+    if (diff > 8) return 'rising';
+    if (diff < -8) return 'falling';
+    return 'level';
+  }
+  const oT = trend(oPitch), sT = trend(sPitch);
+  let extra = '';
+  if (oT !== sT) extra = ' The final tone differs: the model is ' + oT +
+                         ', but yours is ' + sT + '.';
+  if (sPit >= 75) return 'The pitch movement is very similar to the model.' + extra;
+  if (sPit >= 50) return 'The pitch movement is similar in parts of the phrase, ' +
+                         'but not throughout.' + extra;
+  return 'The pitch contour differs from the model. Focus on where the voice goes ' +
+         'up and down, especially at the end of the phrase.' + extra;
+}
+function overallFeedback(overall) {
+  if (overall >= 85) return 'Excellent shadowing. Your pronunciation is very close to the model.';
+  if (overall >= 70) return 'Good approximation. Listen once more and refine timing and final tone.';
+  if (overall >= 50) return 'Your pronunciation is reasonably close to the model. ' +
+                            'Listen again and repeat immediately after the original.';
+  return 'Try again. Slow down, break the phrase into shorter chunks, and shadow each chunk before joining them.';
+}
+
+// =========================================================================
+// PRACTICE CYCLE CHECKLIST
+// =========================================================================
+const checklist = $('psp-checklist');
+checklist.querySelectorAll('input[type=checkbox]').forEach(box => {
+  const key = 'cl.' + box.dataset.cl;
+  if (lsGet(key, '0') === '1') {
+    box.checked = true;
+    box.parentElement.classList.add('done');
+  }
+  box.addEventListener('change', () => {
+    lsSet(key, box.checked ? '1' : '0');
+    box.parentElement.classList.toggle('done', box.checked);
+  });
+});
+$('psp-clear-checklist').addEventListener('click', () => {
+  checklist.querySelectorAll('input[type=checkbox]').forEach(box => {
+    box.checked = false;
+    box.parentElement.classList.remove('done');
+    lsDel('cl.' + box.dataset.cl);
+  });
+});
+
+// =========================================================================
+// PHRASE LIBRARY SELECTOR
+// =========================================================================
+const phraseSelect = $('psp-phrase-select');
+const phraseCounter = $('psp-phrase-counter');
+
+// Populate dropdown
+PHRASE_LIBRARY.forEach((p, i) => {
+  const opt = document.createElement('option');
+  opt.value = String(i);
+  opt.textContent = (i + 1) + '. ' + p.text;
+  phraseSelect.appendChild(opt);
+});
+
+function applyPhraseFromLibrary(idx, opts) {
+  opts = opts || {};
+  if (idx < 0 || idx >= PHRASE_LIBRARY.length) return;
+  const p = PHRASE_LIBRARY[idx];
+  // Update target phrase text and audio source
+  $('psp-phrase-text').textContent = p.text;
+  const audioEl = $('psp-orig-audio');
+  audioEl.setAttribute('src', p.audio);
+  try { audioEl.load(); } catch (_) {}
+  // Invalidate cached original analysis so the next "Generate" uses new audio
+  STATE.origBuffer = null;
+  STATE.origSamples = null;
+  STATE.origEnv = null;
+  STATE.origPitch = null;
+  if (STATE.origWS) { try { STATE.origWS.empty(); } catch (_) {} }
+  // Clear visualisations linked to the original
+  ['psp-orig-wave-fallback', 'psp-orig-env', 'psp-orig-spec', 'psp-orig-pitch',
+   'psp-cmp-orig-wave', 'psp-cmp-orig-env', 'psp-cmp-orig-pitch'].forEach(id => {
+    const c = $(id);
+    if (c && c.getContext) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+  });
+  $('psp-orig-duration').textContent = '';
+  // Update counter, dropdown, and saved index
+  phraseSelect.value = String(idx);
+  phraseCounter.textContent = 'Phrase ' + (idx + 1) + ' of ' + PHRASE_LIBRARY.length;
+  lsSet('phraseIdx', String(idx));
+  // Update Teacher Settings fields to reflect the new phrase + audio
+  if (!opts.skipSettingsFormUpdate) {
+    if ($('psp-set-phrase')) $('psp-set-phrase').value = p.text;
+    if ($('psp-set-audio'))  $('psp-set-audio').value  = p.audio;
+    lsSet('cfg.phrase', p.text);
+    lsSet('cfg.audio',  p.audio);
+  }
+  showMsg('psp-orig-msg',
+    'Loaded phrase ' + (idx + 1) + ': “' + p.text + '”. ' +
+    'Click “Play Original Phrase” to listen, then move to Step 3 to record.',
+    'success');
+}
+
+phraseSelect.addEventListener('change', () => {
+  applyPhraseFromLibrary(parseInt(phraseSelect.value, 10));
+});
+$('psp-phrase-prev').addEventListener('click', () => {
+  const i = parseInt(phraseSelect.value, 10);
+  applyPhraseFromLibrary((i - 1 + PHRASE_LIBRARY.length) % PHRASE_LIBRARY.length);
+});
+$('psp-phrase-next').addEventListener('click', () => {
+  const i = parseInt(phraseSelect.value, 10);
+  applyPhraseFromLibrary((i + 1) % PHRASE_LIBRARY.length);
+});
+
+// =========================================================================
+// TEACHER SETTINGS
+// =========================================================================
+// First-phrase defaults pulled from the lecture library so the activity
+// works out of the box even before the teacher touches anything.
+const LIB_DEFAULT = PHRASE_LIBRARY[0];
+const DEFAULTS = {
+  title:  ROOT.dataset.defaultTitle  || 'Pronunciation Shadowing Practice',
+  video:  ROOT.dataset.defaultVideo  || '',
+  audio:  LIB_DEFAULT.audio,
+  phrase: LIB_DEFAULT.text,
+  instr:  ''
+};
+
+function applySettings(s) {
+  if (s.title) {
+    $('psp-title').textContent = s.title;
+    document.title = s.title;
+  }
+  if (s.video) {
+    $('psp-video-source').setAttribute('src', s.video);
+    try { $('psp-video').load(); } catch (_) {}
+  }
+  if (s.audio) {
+    $('psp-orig-audio').setAttribute('src', s.audio);
+    try { $('psp-orig-audio').load(); } catch (_) {}
+    // invalidate cached original analysis
+    STATE.origBuffer = null;
+    STATE.origSamples = null;
+    STATE.origEnv = null;
+    STATE.origPitch = null;
+  }
+  if (s.phrase) $('psp-phrase-text').textContent = s.phrase;
+  const extra = $('psp-extra-instructions');
+  if (s.instr) {
+    extra.innerHTML = '<div class="psp-info-msg">' +
+      s.instr.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) +
+      '</div>';
+  } else {
+    extra.innerHTML = '';
+  }
+}
+
+function loadSettingsToForm() {
+  $('psp-set-title').value  = lsGet('cfg.title',  DEFAULTS.title);
+  $('psp-set-video').value  = lsGet('cfg.video',  DEFAULTS.video);
+  $('psp-set-audio').value  = lsGet('cfg.audio',  DEFAULTS.audio);
+  $('psp-set-phrase').value = lsGet('cfg.phrase', DEFAULTS.phrase);
+  $('psp-set-instr').value  = lsGet('cfg.instr',  DEFAULTS.instr);
+}
+
+function loadSavedSettings() {
+  const s = {
+    title:  lsGet('cfg.title',  DEFAULTS.title),
+    video:  lsGet('cfg.video',  DEFAULTS.video),
+    audio:  lsGet('cfg.audio',  DEFAULTS.audio),
+    phrase: lsGet('cfg.phrase', DEFAULTS.phrase),
+    instr:  lsGet('cfg.instr',  DEFAULTS.instr)
+  };
+  applySettings(s);
+}
+
+$('psp-set-apply').addEventListener('click', () => {
+  const s = {
+    title:  $('psp-set-title').value.trim()  || DEFAULTS.title,
+    video:  $('psp-set-video').value.trim()  || DEFAULTS.video,
+    audio:  $('psp-set-audio').value.trim()  || DEFAULTS.audio,
+    phrase: $('psp-set-phrase').value.trim() || DEFAULTS.phrase,
+    instr:  $('psp-set-instr').value.trim()
+  };
+  lsSet('cfg.title',  s.title);
+  lsSet('cfg.video',  s.video);
+  lsSet('cfg.audio',  s.audio);
+  lsSet('cfg.phrase', s.phrase);
+  lsSet('cfg.instr',  s.instr);
+  applySettings(s);
+  showMsg('psp-set-msg', 'Settings applied and saved in this browser.', 'success');
+});
+
+$('psp-set-reset').addEventListener('click', () => {
+  ['cfg.title', 'cfg.video', 'cfg.audio', 'cfg.phrase', 'cfg.instr'].forEach(lsDel);
+  applySettings(DEFAULTS);
+  loadSettingsToForm();
+  showMsg('psp-set-msg', 'Teacher settings reset to defaults.', 'info');
+});
+
+loadSavedSettings();
+loadSettingsToForm();
+
+// Restore previously selected phrase from the library (defaults to first).
+(function initPhraseSelection() {
+  let idx = parseInt(lsGet('phraseIdx', '0'), 10);
+  if (isNaN(idx) || idx < 0 || idx >= PHRASE_LIBRARY.length) idx = 0;
+  // Apply without re-saving cfg values that were just loaded from storage.
+  applyPhraseFromLibrary(idx);
+  // Clear the "loaded phrase" success message at startup so the page is calm.
+  clearMsg('psp-orig-msg');
+})();
+
+// =========================================================================
+// REFLECTION (autosave)
+// =========================================================================
+const refl1 = $('psp-refl-1');
+const refl2 = $('psp-refl-2');
+refl1.value = lsGet('reflection1', '');
+refl2.value = lsGet('reflection2', '');
+let reflTimer1, reflTimer2;
+refl1.addEventListener('input', () => {
+  clearTimeout(reflTimer1);
+  reflTimer1 = setTimeout(() => {
+    lsSet('reflection1', refl1.value);
+    $('psp-refl-msg').textContent = 'Saved.';
+    setTimeout(() => { $('psp-refl-msg').textContent = 'Reflections autosave as you type.'; }, 1500);
+  }, 400);
+});
+refl2.addEventListener('input', () => {
+  clearTimeout(reflTimer2);
+  reflTimer2 = setTimeout(() => {
+    lsSet('reflection2', refl2.value);
+    $('psp-refl-msg').textContent = 'Saved.';
+    setTimeout(() => { $('psp-refl-msg').textContent = 'Reflections autosave as you type.'; }, 1500);
+  }, 400);
+});
+
+// =========================================================================
+// FINAL INIT MESSAGES
+// =========================================================================
+window.addEventListener('load', () => {
+  const warnings = [];
+  if (!HAS_WAVESURFER) warnings.push('Wavesurfer.js not loaded — fallback canvas waveforms will be used.');
+  if (!HAS_CHARTJS)    warnings.push('Chart.js not loaded — pitch is drawn on canvas instead.');
+  // Pitchy is async; check after a short delay
+  setTimeout(() => {
+    if (!hasPitchy()) warnings.push('Pitchy not loaded — built-in autocorrelation pitch detector will be used.');
+    if (warnings.length) {
+      showMsg('psp-rec-msg',
+        '<strong>Library status:</strong><br>' + warnings.join('<br>') +
+        '<br>The activity will still work using built-in browser features.',
+        'info');
+    }
+  }, 1500);
+});
+
+})();
+</script>
+</body>
+</html>
