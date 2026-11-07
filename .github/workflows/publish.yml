@@ -41,6 +41,7 @@ jobs:
           fi
       - name: Build the SCORM packages for Moodle (downloads/scorm/)
         run: python tools/build_scorm.py
+      
       - uses: actions/setup-node@v4
         with:
           node-version: 22
