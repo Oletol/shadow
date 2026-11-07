@@ -49,12 +49,12 @@
           "audio": "assets/ben-crystal-original-pronunciation/11%20The%20accent%20that%20I%20am%20speaking.mp3"
         },
         {
-          "text": "It's your identity",
-          "audio": "assets/ben-crystal-original-pronunciation/12%20It%27s%20your%20identity.mp3"
+          "text": "It’s your identity",
+          "audio": "assets/ben-crystal-original-pronunciation/12%20It%E2%80%99s%20your%20identity.mp3"
         },
         {
-          "text": "it's who you are",
-          "audio": "assets/ben-crystal-original-pronunciation/13%20it%27s%20who%20you%20are.mp3"
+          "text": "it’s who you are",
+          "audio": "assets/ben-crystal-original-pronunciation/13%20it%E2%80%99s%20who%20you%20are.mp3"
         },
         {
           "text": "you get beaten up",
@@ -71,6 +71,16 @@
         {
           "text": "my identity",
           "audio": "assets/ben-crystal-original-pronunciation/17%20my%20identity.mp3"
+        },
+        {
+          "text": "There's nothing quite like",
+          "audio": "assets/ben-crystal-original-pronunciation/There%27s%20nothing%20quite%20like.mp3"
+        }
+      ],
+      "full": [
+        {
+          "title": "Ben Crystal - Original Pronunciation",
+          "audio": "assets/ben-crystal-original-pronunciation/full/Ben%20Crystal%20-%20Original%20Pronunciation.mp3"
         }
       ]
     }
