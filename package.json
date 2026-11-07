@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node tests/run-tests.mjs",
+    "build": "python3 tools/build_index.py",
     "serve": "python3 -m http.server 8000"
   }
 }

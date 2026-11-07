@@ -22,7 +22,9 @@ const S = {
   highlight: null,
   playhead: NaN,
   strictness: store.get('strictness', null),
-  refCache: new Map()
+  refCache: new Map(),
+  lecture: null,     // current lecture { id, title, rutubeId, phrases }
+  lectureIdx: 0
 };
 
 // ---------------------------------------------------------------------------
@@ -138,12 +140,12 @@ modelAudio.crossOrigin = 'anonymous';
 modelAudio.preload = 'auto';
 try { modelAudio.preservesPitch = true; modelAudio.mozPreservesPitch = true; modelAudio.webkitPreservesPitch = true; } catch (_) {}
 
-function phrase() { return S.cfg.phrases[S.idx]; }
+function phrase() { return S.lecture.phrases[S.idx]; }
 
 async function selectPhrase(idx) {
-  const n = S.cfg.phrases.length;
+  const n = S.lecture.phrases.length;
   S.idx = ((idx % n) + n) % n;
-  store.set('idx', String(S.idx));
+  store.set('idx.' + S.lecture.id, String(S.idx));
   const token = ++S.token;
   const p = phrase();
   $('phrase-select').value = String(S.idx);
@@ -159,11 +161,11 @@ async function selectPhrase(idx) {
   status('');
 
   try {
-    let ref = S.refCache.get(S.idx);
+    let ref = S.refCache.get(p.audio);
     if (!ref) {
       const samples = await fetchAudio16k(p.audio);
-      ref = { idx: S.idx, samples, base: buildAnalysis(samples, p.text, null), full: null, whisper: null };
-      S.refCache.set(S.idx, ref);
+      ref = { text: p.text, samples, base: buildAnalysis(samples, p.text, null), full: null, whisper: null };
+      S.refCache.set(p.audio, ref);
     }
     if (token !== S.token) return;
     S.ref = ref;
@@ -178,7 +180,7 @@ async function selectPhrase(idx) {
 }
 
 async function prepareReferenceModels(ref, token) {
-  const p = S.cfg.phrases[ref.idx];
+  const p = { text: ref.text };
   if (!ref.full) {
     try {
       const ctc = await runCtc(ref.samples);
@@ -189,6 +191,7 @@ async function prepareReferenceModels(ref, token) {
     }
   }
   if (token === S.token) renderStave();
+  if (!S.cfg.showReferenceCheck) return;
   if (ref.whisper == null) {
     try { ref.whisper = await runAsr(ref.samples, refAnalysis(ref).span); } catch (_) { return; }
   }
@@ -197,7 +200,7 @@ async function prepareReferenceModels(ref, token) {
   const heard = splitWords(ref.whisper).join(' ');
   if (heard && heard !== target) {
     const note = $('ref-note');
-    note.textContent = `Teacher check: the recogniser hears “${ref.whisper}” in the speaker’s recording. If the text above does not match the audio, correct it in data/phrases.json.`;
+    note.textContent = `Teacher check: the recogniser hears “${ref.whisper}” in the speaker’s recording. If the text above does not match the audio, rename the audio file.`;
     note.hidden = false;
   }
 }
@@ -383,7 +386,7 @@ async function analyseStudent() {
       S.waitingForModel = false;
       status('Analysing your recording…');
       if (!ref.full) {
-        ref.full = buildAnalysis(ref.samples, S.cfg.phrases[ref.idx].text, await runCtc(ref.samples));
+        ref.full = buildAnalysis(ref.samples, ref.text, await runCtc(ref.samples));
       }
       const ctc = await runCtc(S.stu.samples);
       stuA = buildAnalysis(S.stu.samples, p.text, ctc);
@@ -558,37 +561,83 @@ function drawPictures() {
 // ---------------------------------------------------------------------------
 // Start-up
 // ---------------------------------------------------------------------------
-async function init() {
+async function loadConfig() {
+  // data/lectures.json is generated from the assets/ folders (tools/build_index.py);
+  // data/phrases.json is the older single-lecture format.
+  const get = async (url) => { const r = await fetch(url, { cache: 'no-cache' }); if (!r.ok) throw new Error(url); return r.json(); };
+  let cfg;
+  try { cfg = await get('data/lectures.json'); }
+  catch (_) {
+    cfg = await get('data/phrases.json');
+    cfg.lectures = [{ id: 'default', title: cfg.lecture && cfg.lecture.title, rutubeId: cfg.lecture && cfg.lecture.rutubeId, phrases: cfg.phrases }];
+  }
   try {
-    const r = await fetch('data/phrases.json', { cache: 'no-cache' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    S.cfg = await r.json();
-  } catch (e) {
-    $('stave-msg').textContent = 'The phrase list (data/phrases.json) could not be loaded. Open the page through a web server, not as a file.';
-    return;
-  }
-  const cfg = S.cfg;
-  if (cfg.title) { $('app-title').textContent = cfg.title; document.title = cfg.title; }
-  if (cfg.lecture) {
-    $('lecture-title').textContent = cfg.lecture.title || '';
-    const lecture = $('lecture');
-    if (cfg.lecture.rutubeId) {
-      lecture.addEventListener('toggle', () => {
-        const v = $('video');
-        if (lecture.open && !v.src) v.src = 'https://rutube.ru/play/embed/' + cfg.lecture.rutubeId;
-      });
-    } else lecture.hidden = true;
-  }
-  if (!S.strictness) S.strictness = cfg.strictness || 'standard';
-  $('strictness').value = S.strictness;
+    const settings = await get('data/settings.json');
+    cfg = { ...cfg, ...settings, lectures: cfg.lectures };
+  } catch (_) {}
+  cfg.lectures = (cfg.lectures || []).filter((l) => l.phrases && l.phrases.length);
+  if (!cfg.lectures.length) throw new Error('empty');
+  return cfg;
+}
+
+function selectLecture(li, phraseIdx) {
+  const n = S.cfg.lectures.length;
+  S.lectureIdx = ((li % n) + n) % n;
+  S.lecture = S.cfg.lectures[S.lectureIdx];
+  store.set('lecture', S.lecture.id);
+  $('lecture-select').value = String(S.lectureIdx);
+  $('lecture-title').textContent = S.lecture.title || '';
+
+  const lecture = $('lecture');
+  const v = $('video');
+  lecture.hidden = !S.lecture.rutubeId && !S.lecture.video;
+  v.removeAttribute('src');
+  if (lecture.open) loadVideo();
 
   const sel = $('phrase-select');
-  cfg.phrases.forEach((p, i) => {
+  sel.innerHTML = '';
+  S.lecture.phrases.forEach((p, i) => {
     const o = document.createElement('option');
     o.value = String(i);
     o.textContent = `${i + 1}. ${p.text}`;
     sel.append(o);
   });
+  const saved = parseInt(store.get('idx.' + S.lecture.id, '0'), 10);
+  selectPhrase(phraseIdx != null ? phraseIdx : (Number.isFinite(saved) ? saved : 0));
+}
+
+function loadVideo() {
+  const v = $('video');
+  if (v.getAttribute('src')) return;
+  if (S.lecture.rutubeId) v.src = 'https://rutube.ru/play/embed/' + S.lecture.rutubeId;
+  else if (S.lecture.video) v.src = S.lecture.video;
+}
+
+async function init() {
+  try {
+    S.cfg = await loadConfig();
+  } catch (e) {
+    $('stave-msg').textContent = 'The list of phrases could not be loaded. Open the page through a web server, not as a file, and check data/lectures.json.';
+    return;
+  }
+  const cfg = S.cfg;
+  if (cfg.title) { $('app-title').textContent = cfg.title; document.title = cfg.title; }
+  if (!S.strictness) S.strictness = cfg.strictness || 'standard';
+  $('strictness').value = S.strictness;
+
+  const lsel = $('lecture-select');
+  cfg.lectures.forEach((l, i) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = l.title || l.id;
+    lsel.append(o);
+  });
+  lsel.hidden = cfg.lectures.length < 2;
+  $('lecture-title').hidden = cfg.lectures.length >= 2;
+  lsel.addEventListener('change', () => selectLecture(parseInt(lsel.value, 10)));
+  $('lecture').addEventListener('toggle', () => { if ($('lecture').open) loadVideo(); });
+
+  const sel = $('phrase-select');
   sel.addEventListener('change', () => selectPhrase(parseInt(sel.value, 10)));
   $('prev').addEventListener('click', () => selectPhrase(S.idx - 1));
   $('next').addEventListener('click', () => selectPhrase(S.idx + 1));
@@ -616,8 +665,9 @@ async function init() {
   document.fonts && document.fonts.ready.then(renderStave);
 
   startWorker(cfg);
-  const saved = parseInt(store.get('idx', '0'), 10);
-  selectPhrase(Number.isFinite(saved) ? saved : 0);
+  const savedLecture = store.get('lecture', null);
+  const li = Math.max(0, cfg.lectures.findIndex((l) => l.id === savedLecture));
+  selectLecture(li);
 }
 
 init();

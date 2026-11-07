@@ -44,6 +44,15 @@ h3 { font-size: 1.05rem; font-weight: 600; margin: 32px 0 6px; }
 }
 .brand-name { margin: 0; color: var(--ink); font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
 .brand-sub { margin: 0; font-size: 0.92rem; }
+.lecture-select {
+  font: 500 0.95rem var(--sans); color: var(--blue);
+  background: transparent; border: 0; border-bottom: 1px dashed currentColor;
+  padding: 2px 18px 2px 0; margin-top: 2px; max-width: 100%; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%230541f0' stroke-width='1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 2px center; background-size: 10px;
+}
+.lecture-select[hidden], .brand-sub[hidden] { display: none; }
 .picker { display: flex; align-items: center; gap: 6px; flex: 0 1 420px; min-width: 0; }
 .picker select, .strict select {
   font: inherit; color: var(--ink);
