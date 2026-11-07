@@ -1,0 +1,9 @@
+{
+  "name": "shadowing-practice",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run-tests.mjs",
+    "serve": "python3 -m http.server 8000"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "title": "Shadowing practice",
+  "lecture": {
+    "title": "Ben Crystal on Original Pronunciation",
+    "rutubeId": "637c894306ff0bf72b9e94a0b647a090"
+  },
+  "models": {
+    "alignment": "Xenova/wav2vec2-base-960h",
+    "recognition": "Xenova/whisper-base.en",
+    "host": null
+  },
+  "strictness": "standard",
+  "phrases": [
+    { "text": "What was that?", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/What%20was%20that.mp3" },
+    { "text": "What we can learn from it", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/What%20we%20can%20learn%20from%20it.mp3" },
+    { "text": "When I was a young actor", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/When%20I%20was%20a%20young%20actor.mp3" },
+    { "text": "I'd have to speak Shakespeare", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/Had%20to%20speak.mp3" },
+    { "text": "than the clothes that you wear", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/the%20clothes.mp3" },
+    { "text": "than the things that you retweet", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/things%20you%20retweet.mp3" },
+    { "text": "of the sound system", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/of%20the%20sound%20system.mp3" },
+    { "text": "I'll try and explain as", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/try%20and%20explain%20as%20much.mp3" },
+    { "text": "modified received pronunciation", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/Modified%20RP.mp3" },
+    { "text": "what it might remind you of", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/what%20it%20might%20remind%20you%20of.mp3" },
+    { "text": "The accent that I am speaking", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/The%20accent%20that%20I%20am%20speaking.mp3" },
+    { "text": "It's your identity", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/It%27s%20your%20identity.mp3" },
+    { "text": "it's who you are", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/it%E2%80%99s%20who%20you%20are.mp3" },
+    { "text": "you get beaten up", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/you%20get%20beaten%20up.mp3" },
+    { "text": "over the next forty minutes or so", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/over%20the%20next%20forty%20minutes%20or%20so.mp3" },
+    { "text": "or the aural", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/or%20the%20aural.mp3" },
+    { "text": "my identity", "audio": "https://cdn.jsdelivr.net/gh/Oletol/shadow@main/assets/my%20identity.mp3" }
+  ]
+}
