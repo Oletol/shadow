@@ -6,6 +6,7 @@ import { drawStave, drawWave, drawSpectrogram } from './charts.js';
 import { splitWords } from './align.js';
 import { yinFrameHz } from './pitch.js';
 import { comparePhonemes } from './phonemes.js';
+import { inScorm, startReporting, report, phraseKey } from './report.js';
 
 // Practice steps (a sequence: melody first, then shadowing, then alone)
 const MODES = {
@@ -43,7 +44,9 @@ const S = {
   lectureIdx: 0,
   mode: store.get('mode', 'melody'),
   live: null,         // live pitch points while recording
-  loop: null          // stop() of the running loop
+  loop: null,         // stop() of the running loop
+  attempts: 0,        // recordings made on this page (numbers the attempts sent to Moodle)
+  listens: 0          // times the student played the speaker since the last recording
 };
 if (!MODES[S.mode]) S.mode = 'melody';
 
@@ -89,6 +92,7 @@ function startWorker(cfg) {
       models[m.model].reject(new Error(m.error));
       setModelStatus(m.model, 'failed', 'could not load');
       console.warn(m.model, m.error);
+      report('problem', { what: 'model-' + m.model, detail: String(m.error).slice(0, 120) });
     } else if (m.type === 'result' || m.type === 'error') {
       const p = pending.get(m.id);
       if (!p) return;
@@ -187,6 +191,8 @@ async function selectPhrase(idx) {
   store.set('idx.' + S.lecture.id, String(S.idx));
   const token = ++S.token;
   const p = phrase();
+  S.listens = 0;
+  report('phrase', { lecture: S.lecture.id, phrase: S.idx + 1, text: p.text });
   $('phrase-select').value = String(S.idx);
   $('phrase').textContent = p.text;
   $('phrase-count').textContent = `Phrase ${S.idx + 1} of ${n}`;
@@ -396,6 +402,7 @@ async function toggleRecording() {
     await recorder.start();
   } catch (e) {
     status('Microphone access was blocked. Allow the microphone for this site and try again.', 'error');
+    report('problem', { what: 'microphone', detail: e && e.name });
     return;
   }
   const mode = S.mode;
@@ -432,7 +439,9 @@ async function stopRecording() {
   try {
     const samples = await decodeTo16k(await blob.arrayBuffer());
     if (S.stu && S.stu.url) URL.revokeObjectURL(S.stu.url);
-    S.stu = { samples, analysis: null, whisper: null, phon: null, mode: S.recMode, url: URL.createObjectURL(blob) };
+    S.stu = { samples, analysis: null, whisper: null, phon: null, mode: S.recMode, url: URL.createObjectURL(blob),
+      attempt: ++S.attempts, listens: S.listens, duration: samples.length / SR };
+    S.listens = 0;
     await analyseStudent();
   } catch (e) {
     console.error(e);
@@ -543,6 +552,7 @@ async function runIpa(quiet) {
     if (token !== S.token || stu !== S.stu) return;
     stu.phon = comparePhonemes(ref.phon, sp, sp.id2sym, refA.words, sp.blank);
     computeAndRender();
+    if (stu.phon) report('ipa', { lecture: S.lecture.id, phrase: S.idx + 1 });
     status(stu.phon ? 'Done. The table now shows the sounds of each word in IPA.' : 'The speaker’s sounds could not be recognised in IPA.');
   } catch (e) {
     S.waitingForPhon = false;
@@ -568,25 +578,96 @@ function computeAndRender() {
     phonemes: S.stu.phon
   });
   saveBest(S.stu.mode, S.result.overall);
+  reportAttempt(strictness);
   renderResults();
   renderStave();
+}
+
+// One attempt = one recording. It is sent again with the same number when the
+// result is refined (speech recogniser, IPA check, strictness), so the latest
+// numbers replace the earlier ones.
+function reportAttempt(strictness) {
+  const R = S.result, st = S.stu, p = phrase();
+  if (!R || !st || R.overall == null) return;
+  const sc = (x) => (x && x.score != null ? x.score : null);
+  const speech = R.mode !== 'melody';   // humming: only melody and timing are scored
+  report('attempt', {
+    id: st.attempt, lecture: S.lecture.id, phrase: S.idx + 1, text: p.text, key: phraseKey(p),
+    step: st.mode, overall: R.overall, passed: R.overall >= PASS,
+    melody: sc(R.intonation), rhythm: sc(R.rhythm),
+    sounds: speech ? sc(R.pronunciation) : null, stress: speech ? sc(R.stress) : null,
+    words: speech && R.words && R.words.accuracy != null ? Math.round(R.words.accuracy * 100) : null,
+    listens: st.listens, duration: Math.round(st.duration * 10) / 10,
+    strictness, ipa: !!st.phon
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Practice steps and best scores
 // ---------------------------------------------------------------------------
-const bestKey = (mode) => 'best.' + phrase().audio + '.' + mode;
+// In the Moodle package the best scores belong to the student's Moodle record
+// (they follow the student to any computer); elsewhere they stay in this browser.
+const scormBest = new Map();
+let scormState = null;       // set when the package has sent what Moodle saved
+const bestKey = (mode, p = phrase()) => 'best.' + p.audio + '.' + mode;
+function getBest(mode, p) {
+  const k = bestKey(mode, p);
+  if (inScorm) return scormBest.has(k) ? scormBest.get(k) : -1;
+  return parseInt(store.get(k, '-1'), 10);
+}
 function saveBest(mode, score) {
   if (score == null || !S.lecture) return;
-  const prev = parseInt(store.get(bestKey(mode), '-1'), 10);
-  if (score > prev) store.set(bestKey(mode), String(score));
+  const prev = getBest(mode);
+  if (score > prev) {
+    if (inScorm) { scormBest.set(bestKey(mode), score); sendProgress(); }
+    else store.set(bestKey(mode), String(score));
+  }
   renderSteps();
 }
+
+// What Moodle keeps: best score per step for every phrase (restored next time),
+// the grade = average best "On your own" score over all phrases of the package,
+// and "completed" once every phrase has passed "On your own".
+function sendProgress() {
+  if (!inScorm || !scormState) return;
+  const b = {};
+  let sum = 0, n = 0, all = true;
+  for (const L of S.cfg.lectures) {
+    for (const p of L.phrases) {
+      const row = MODE_ORDER.map((m) => getBest(m, p));
+      if (row.some((v) => v >= 0)) b[phraseKey(p)] = row;
+      n++;
+      sum += Math.max(0, row[3]);
+      if (row[3] < PASS) all = false;
+    }
+  }
+  report('progress', { suspend: JSON.stringify({ v: 1, b }), score: n ? Math.round(sum / n) : 0, completed: n > 0 && all, phrases: n });
+}
+
+function restoreFromMoodle(state) {
+  scormState = state;
+  let saved = null;
+  try { saved = state.suspend ? JSON.parse(state.suspend) : null; } catch (_) {}
+  const b = saved && saved.v === 1 && saved.b ? saved.b : {};
+  for (const L of S.cfg.lectures) {
+    for (const p of L.phrases) {
+      const row = b[phraseKey(p)];
+      if (!Array.isArray(row)) continue;
+      MODE_ORDER.forEach((m, i) => {
+        const v = Number(row[i]), k = bestKey(m, p);
+        if (Number.isFinite(v) && v > (scormBest.has(k) ? scormBest.get(k) : -1)) scormBest.set(k, v);
+      });
+    }
+  }
+  renderSteps();
+  if (scormBest.size) sendProgress();
+}
+
 function renderSteps() {
   if (!S.lecture) return;
   document.querySelectorAll('.step').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === S.mode)));
   document.querySelectorAll('[data-best]').forEach((el) => {
-    const v = parseInt(store.get(bestKey(el.dataset.best), '-1'), 10);
+    const v = getBest(el.dataset.best);
     el.textContent = v >= 0 ? String(v) : '';
     el.classList.toggle('passed', v >= PASS);
     el.title = v >= 0 ? 'Your best score for this step' : '';
@@ -908,15 +989,19 @@ async function init() {
   lsel.addEventListener('change', () => selectLecture(parseInt(lsel.value, 10)));
   $('part-select').addEventListener('change', (e) => selectPart(parseInt(e.target.value, 10)));
   // only one thing plays at a time
-  fullAudio().addEventListener('play', () => modelAudio.pause());
+  fullAudio().addEventListener('play', () => {
+    modelAudio.pause();
+    const part = (S.lecture.full || [])[parseInt($('part-select').value, 10) || 0];
+    report('full-lecture', { lecture: S.lecture.id, part: part ? part.title : '' });
+  });
   modelAudio.addEventListener('play', () => fullAudio().pause());
 
   const sel = $('phrase-select');
   sel.addEventListener('change', () => selectPhrase(parseInt(sel.value, 10)));
   $('prev').addEventListener('click', () => selectPhrase(S.idx - 1));
   $('next').addEventListener('click', () => selectPhrase(S.idx + 1));
-  $('btn-listen').addEventListener('click', () => { stopLoop(); listen(1); });
-  $('btn-slow').addEventListener('click', () => { stopLoop(); listen(0.75); });
+  $('btn-listen').addEventListener('click', () => { stopLoop(); S.listens++; listen(1); });
+  $('btn-slow').addEventListener('click', () => { stopLoop(); S.listens++; listen(0.75); });
   $('btn-record').addEventListener('click', toggleRecording);
   $('btn-loop').addEventListener('click', toggleLoop);
   $('btn-ipa').addEventListener('click', () => runIpa(false));
@@ -942,6 +1027,7 @@ async function init() {
   document.fonts && document.fonts.ready.then(renderStave);
 
   startWorker(cfg);
+  startReporting(cfg, restoreFromMoodle);
   const savedLecture = store.get('lecture', null);
   const li = Math.max(0, cfg.lectures.findIndex((l) => l.id === savedLecture));
   selectLecture(li);

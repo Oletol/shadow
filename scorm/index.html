@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<!--
+  SCORM 1.2 package for the shadowing practice (built by tools/build_scorm.py).
+  The practice itself is loaded from GitHub Pages, so new phrases and fixes reach
+  Moodle without uploading the package again. This page only passes the numbers
+  from the practice to Moodle: one interaction per recording, the best scores,
+  the grade and the completion status. No audio leaves the student's browser.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #eef1f8; }
+  #app { display: block; width: 100%; height: 100%; border: 0; }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
+    padding: 10px 16px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #fff4e5; color: #5a3500; border-top: 2px solid #f5851c;
+  }
+  .bar[hidden], .chip[hidden] { display: none; }
+  .bar button { float: right; margin-left: 12px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+  .chip {
+    position: fixed; right: 12px; bottom: 12px; z-index: 1;
+    padding: 4px 10px; border-radius: 999px; font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0a1e64; color: #fff; opacity: .85;
+  }
+</style>
+</head>
+<body>
+<iframe id="app" title="__TITLE__" allow="microphone; autoplay; fullscreen"></iframe>
+<p class="bar" id="bar" role="alert" hidden><button type="button" id="bar-close" aria-label="Close">✕</button><span id="bar-text"></span></p>
+<p class="chip" id="saved" role="status" hidden>Saved in Moodle</p>
+<script>
+(function () {
+  'use strict';
+  var APP_URL = __APP_URL__;
+  var APP_ORIGIN = new URL(APP_URL).origin;
+  var STEPS = { melody: 'melody', slow: 'slow', shadow: 'shadow', own: 'own' };
+  var MIC_MSG = 'The microphone is blocked in this window, so recordings cannot be made here. ' +
+    'Teacher: in the settings of this SCORM package set “Display package” to “New window”.';
+
+  var frame = document.getElementById('app');
+  var bar = document.getElementById('bar');
+  var chip = document.getElementById('saved');
+  document.getElementById('bar-close').onclick = function () { bar.hidden = true; };
+  function show(text) { document.getElementById('bar-text').textContent = text; bar.hidden = false; }
+
+  // --- SCORM 1.2 API ------------------------------------------------------
+  function findAPI(win) {
+    for (var i = 0; win && i < 12; i++) {
+      try { if (win.API) return win.API; } catch (e) { return null; }
+      if (win.parent === win) break;
+      win = win.parent;
+    }
+    return null;
+  }
+  var api = findAPI(window);
+  if (!api && window.opener) api = findAPI(window.opener);
+  var live = false;
+  try { live = !!api && String(api.LMSInitialize('')) === 'true'; } catch (e) { live = false; }
+
+  function get(k) {
+    if (!live) return '';
+    try { var v = api.LMSGetValue(k); return v == null ? '' : String(v); } catch (e) { return ''; }
+  }
+  function set(k, v) {
+    if (!live) return false;
+    try {
+      if (String(api.LMSSetValue(k, String(v))) === 'true') return true;
+      var c = api.LMSGetLastError();
+      console.warn('SCORM: could not set', k, '=', v, '–', c, api.LMSGetErrorString(c));
+    } catch (e) { console.warn('SCORM:', k, e); }
+    return false;
+  }
+
+  var started = Date.now();
+  var status = get('cmi.core.lesson_status');
+  if (live && (status === '' || status === 'not attempted')) { set('cmi.core.lesson_status', 'incomplete'); status = 'incomplete'; }
+  var suspend = get('cmi.suspend_data');
+  var nextN = parseInt(get('cmi.interactions._count'), 10) || 0;
+  var lectures = 1;
+
+  if (!api) show('This page is not connected to Moodle, so results are not saved. Open it from the Moodle course.');
+  else if (!live) show('Moodle did not accept the connection, so results are not saved. Reload the page.');
+
+  // Chrome and Edge can tell straight away whether this window may use the microphone
+  var fp = document.permissionsPolicy || document.featurePolicy;
+  try { if (fp && fp.allowsFeature && !fp.allowsFeature('microphone')) show(MIC_MSG); } catch (e) {}
+
+  // --- formats ------------------------------------------------------------
+  function pad(n, w) { n = String(n); while (n.length < w) n = '0' + n; return n; }
+  function clock(d) { return pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2); }
+  function timespan(sec) {
+    var cs = Math.round(Math.max(0, Math.min(Number(sec) || 0, 9999 * 3600)) * 100);
+    var h = Math.floor(cs / 360000), m = Math.floor(cs % 360000 / 6000), s = cs % 6000;
+    return pad(h, 4) + ':' + pad(m, 2) + ':' + pad(Math.floor(s / 100), 2) + '.' + pad(s % 100, 2);
+  }
+  function num(x) {
+    if (x == null || x === '' || typeof x === 'boolean') return null;
+    x = Number(x);
+    return isFinite(x) ? Math.max(0, Math.min(100, Math.round(x))) : null;
+  }
+  function slug(s) {
+    return String(s || '').replace(/['’‘]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  }
+  function interactionId(m) {
+    var lec = lectures > 1 ? slug(m.lecture).slice(0, 40) + ':' : '';
+    return (lec + pad(Math.max(0, Math.min(999, m.phrase | 0)), 2) + '-' + STEPS[m.step] + '-' + slug(m.text)).slice(0, 250);
+  }
+  function responseText(m) {
+    var v = function (x) { x = num(x); return x == null ? 'n/a' : String(x); };
+    var parts = [
+      'overall ' + v(m.overall), 'melody ' + v(m.melody), 'sounds ' + v(m.sounds),
+      'rhythm ' + v(m.rhythm), 'stress ' + v(m.stress)
+    ];
+    if (num(m.words) != null) parts.push('words ' + num(m.words) + '%');
+    parts.push('listened ' + Math.max(0, m.listens | 0));
+    if (m.strictness) parts.push(slug(m.strictness));
+    if (m.ipa) parts.push('IPA');
+    return parts.join('; ').slice(0, 255);
+  }
+
+  // --- attempts: one interaction per recording ----------------------------
+  // A recording is refined a few seconds after it is made (speech recogniser,
+  // IPA check), so it is written when it has been quiet for a moment, or when the
+  // next recording starts, or when the page closes. Later changes rewrite it.
+  var slots = {}, pending = {}, timers = {};
+  function writeAttempt(id) {
+    var m = pending[id];
+    if (!m) return;
+    delete pending[id];
+    var n = slots[id], fresh = n == null;
+    if (fresh) { n = nextN++; slots[id] = n; }
+    var p = 'cmi.interactions.' + n + '.';
+    if (fresh) {
+      set(p + 'id', interactionId(m));
+      set(p + 'type', 'performance');
+      set(p + 'time', clock(new Date(m.at)));
+    }
+    set(p + 'student_response', responseText(m));
+    if (num(m.overall) != null) set(p + 'result', String(num(m.overall)));
+    if (isFinite(m.duration)) set(p + 'latency', timespan(Number(m.duration)));
+    commitSoon();
+  }
+  function queueAttempt(m) {
+    if (!STEPS[m.step] || !isFinite(m.id)) return;
+    var id = String(m.id);
+    m.at = pending[id] ? pending[id].at : Date.now();
+    for (var other in pending) if (other !== id) { clearTimeout(timers[other]); writeAttempt(other); }
+    pending[id] = m;
+    clearTimeout(timers[id]);
+    timers[id] = setTimeout(function () { writeAttempt(id); }, 8000);
+  }
+  function flushAttempts() { for (var id in pending) { clearTimeout(timers[id]); writeAttempt(id); } }
+
+  // --- best scores, grade, completion -------------------------------------
+  function writeProgress(m) {
+    if (typeof m.suspend === 'string') {
+      if (m.suspend.length <= 4096) { if (set('cmi.suspend_data', m.suspend)) suspend = m.suspend; }
+      else console.warn('SCORM: progress is longer than 4096 characters and was not saved; split the lecture into two packages');
+    }
+    var score = num(m.score);
+    if (score != null) {
+      set('cmi.core.score.min', '0');
+      set('cmi.core.score.max', '100');
+      set('cmi.core.score.raw', String(score));
+    }
+    if (m.completed && status !== 'completed' && status !== 'passed') {
+      if (set('cmi.core.lesson_status', 'completed')) status = 'completed';
+    }
+    commitSoon();
+  }
+
+  var commitTimer = 0, chipTimer = 0;
+  function commitSoon() {
+    if (!live) return;
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(commit, 1500);
+  }
+  function commit() {
+    clearTimeout(commitTimer);
+    if (!live || finished) return;
+    var ok = false;
+    try { ok = String(api.LMSCommit('')) === 'true'; } catch (e) {}
+    if (ok) {
+      chip.hidden = false;
+      clearTimeout(chipTimer);
+      chipTimer = setTimeout(function () { chip.hidden = true; }, 2500);
+    }
+  }
+
+  var finished = false;
+  function finish() {
+    if (!live || finished) return;
+    flushAttempts();
+    set('cmi.core.session_time', timespan((Date.now() - started) / 1000));
+    set('cmi.core.exit', 'suspend');
+    finished = true;
+    try { api.LMSCommit(''); api.LMSFinish(''); } catch (e) {}
+  }
+  window.addEventListener('pagehide', finish);
+  window.addEventListener('beforeunload', finish);
+
+  // --- messages from the practice -----------------------------------------
+  function sendState() {
+    try {
+      frame.contentWindow.postMessage({ source: 'shadow-scorm', type: 'state', connected: live, suspend: suspend }, APP_ORIGIN);
+    } catch (e) {}
+  }
+  window.addEventListener('message', function (ev) {
+    if (ev.origin !== APP_ORIGIN || ev.source !== frame.contentWindow) return;
+    var m = ev.data;
+    if (!m || typeof m !== 'object' || m.source !== 'shadow') return;
+    if (m.type === 'hello') {
+      if (m.lectures && m.lectures.length) lectures = m.lectures.length;
+      sendState();
+    } else if (m.type === 'attempt') queueAttempt(m);
+    else if (m.type === 'progress') writeProgress(m);
+    else if (m.type === 'problem' && m.what === 'microphone') show(MIC_MSG);
+  });
+
+  frame.src = APP_URL;
+})();
+</script>
+</body>
+</html>

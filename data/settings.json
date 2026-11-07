@@ -7,5 +7,7 @@
     "recognition": "Xenova/whisper-base.en",
     "host": null
   },
-  "phonemes": "on-request"
+  "phonemes": "on-request",
+  "publicUrl": "https://oletol.github.io/shadow/",
+  "goatcounter": null
 }
