@@ -17,24 +17,36 @@
     <div class="brand">
       <p class="brand-name" id="app-title">Shadowing practice</p>
       <p class="brand-sub" id="lecture-title"></p>
-      <label class="sr-only" for="lecture-select">Lecture</label>
-      <select class="lecture-select" id="lecture-select" hidden></select>
     </div>
-    <nav class="picker" aria-label="Choose a phrase">
-      <button class="icon-btn" id="prev" type="button" aria-label="Previous phrase">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
-      </button>
-      <label class="sr-only" for="phrase-select">Phrase</label>
-      <select id="phrase-select"></select>
-      <button class="icon-btn" id="next" type="button" aria-label="Next phrase">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
-      </button>
-    </nav>
+    <div class="choosers">
+      <div class="field" id="lecture-field" hidden>
+        <label for="lecture-select">Lecture</label>
+        <select id="lecture-select"></select>
+      </div>
+      <div class="field">
+        <label for="phrase-select">Phrase</label>
+        <nav class="picker" aria-label="Choose a phrase">
+          <button class="icon-btn" id="prev" type="button" aria-label="Previous phrase">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+          </button>
+          <select id="phrase-select"></select>
+          <button class="icon-btn" id="next" type="button" aria-label="Next phrase">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </nav>
+      </div>
+    </div>
   </header>
 
-  <details class="lecture" id="lecture">
-    <summary>Watch the lecture</summary>
-    <div class="video"><iframe id="video" title="Lecture video" allow="clipboard-write; autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>
+  <details class="lecture" id="lecture" hidden>
+    <summary>Listen to the full lecture</summary>
+    <div class="full">
+      <div class="field" id="part-field" hidden>
+        <label for="part-select">Part</label>
+        <select id="part-select"></select>
+      </div>
+      <audio id="full-audio" controls preload="none"></audio>
+    </div>
   </details>
 
   <main>

@@ -17,8 +17,8 @@
           "audio": "assets/ben-crystal-original-pronunciation/03%20When%20I%20was%20a%20young%20actor.mp3"
         },
         {
-          "text": "I'd have to speak Shakespeare",
-          "audio": "assets/ben-crystal-original-pronunciation/04%20I%27d%20have%20to%20speak%20Shakespeare.mp3"
+          "text": "I’d have to speak Shakespeare in received pronunciation",
+          "audio": "assets/ben-crystal-original-pronunciation/04%20I%E2%80%99d%20have%20to%20speak%20Shakespeare%20in%20received%20pronunciation.mp3"
         },
         {
           "text": "than the clothes that you wear",
@@ -33,8 +33,8 @@
           "audio": "assets/ben-crystal-original-pronunciation/07%20of%20the%20sound%20system.mp3"
         },
         {
-          "text": "I'll try and explain as much",
-          "audio": "assets/ben-crystal-original-pronunciation/08%20I%27ll%20try%20and%20explain%20as%20much.mp3"
+          "text": "I’ll try and explain as much as I can to you",
+          "audio": "assets/ben-crystal-original-pronunciation/08%20I%E2%80%99ll%20try%20and%20explain%20as%20much%20as%20I%20can%20to%20you.mp3"
         },
         {
           "text": "modified received pronunciation",
@@ -53,8 +53,8 @@
           "audio": "assets/ben-crystal-original-pronunciation/12%20It%27s%20your%20identity.mp3"
         },
         {
-          "text": "it’s who you are",
-          "audio": "assets/ben-crystal-original-pronunciation/13%20it%E2%80%99s%20who%20you%20are.mp3"
+          "text": "it's who you are",
+          "audio": "assets/ben-crystal-original-pronunciation/13%20it%27s%20who%20you%20are.mp3"
         },
         {
           "text": "you get beaten up",
@@ -72,8 +72,7 @@
           "text": "my identity",
           "audio": "assets/ben-crystal-original-pronunciation/17%20my%20identity.mp3"
         }
-      ],
-      "rutubeId": "637c894306ff0bf72b9e94a0b647a090"
+      ]
     }
   ]
 }

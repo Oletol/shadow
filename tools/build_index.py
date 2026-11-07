@@ -5,7 +5,9 @@ Folder layout (one folder per lecture):
 
     assets/
       ben-crystal-original-pronunciation/
-        lecture.json                 optional: title, video, text corrections
+        lecture.json                 optional: title, text corrections
+        full/                        the whole lecture (one or several parts)
+          Part 1.mp3
         01 What was that.mp3         the file name IS the phrase text
         02 What we can learn from it.mp3
       another-lecture/
@@ -21,8 +23,6 @@ Rules for file names
 lecture.json (all fields optional)
     {
       "title": "Ben Crystal on Original Pronunciation",
-      "rutube": "https://rutube.ru/video/637c894306ff0bf72b9e94a0b647a090/",
-      "video": "https://... any embeddable video URL ...",
       "texts": { "01 What was that.mp3": "What was that?" }
     }
 
@@ -40,7 +40,6 @@ ASSETS = ROOT / "assets"
 OUT = ROOT / "data" / "lectures.json"
 AUDIO = {".mp3", ".wav", ".m4a", ".ogg", ".oga", ".webm", ".aac", ".flac"}
 NUM_PREFIX = re.compile(r"^\s*(\d+)\s*[.)_\-\s]\s*")
-RUTUBE_ID = re.compile(r"([a-f0-9]{32})", re.I)
 
 
 def phrase_from_name(stem):
@@ -61,6 +60,23 @@ def title_from_folder(name):
 
 def url_for(*parts):
     return "/".join(quote(p, safe="") for p in parts)
+
+
+def full_lecture(folder):
+    """Audio files in <lecture>/full/ : the complete lecture, in one or several parts."""
+    sub = next((p for p in folder.iterdir() if p.is_dir() and p.name.lower() == "full"), None)
+    if not sub:
+        return []
+    parts = []
+    for f in sub.iterdir():
+        if f.is_file() and f.suffix.lower() in AUDIO and not f.name.startswith("._"):
+            order, title = phrase_from_name(f.stem)
+            parts.append((order if order is not None else 10**9, title.lower(), {
+                "title": title or f.stem,
+                "audio": url_for("assets", folder.name, sub.name, f.name),
+            }))
+    parts.sort(key=lambda x: (x[0], x[1]))
+    return [p[2] for p in parts]
 
 
 def build():
@@ -87,7 +103,7 @@ def build():
 
         items = []
         for f in folder.iterdir():
-            if not f.is_file() or f.suffix.lower() not in AUDIO:
+            if not f.is_file() or f.suffix.lower() not in AUDIO or f.name.startswith("._"):
                 continue
             order, text = phrase_from_name(f.stem)
             text = texts.get(f.name, text)
@@ -107,15 +123,9 @@ def build():
             "title": meta.get("title") or title_from_folder(folder.name),
             "phrases": [x[2] for x in items],
         }
-        rutube = meta.get("rutube") or meta.get("rutubeId")
-        if rutube:
-            m = RUTUBE_ID.search(rutube)
-            if m:
-                lecture["rutubeId"] = m.group(1).lower()
-            else:
-                warnings.append(f"{folder.name}: could not find a RuTube video id in {rutube!r}")
-        if meta.get("video"):
-            lecture["video"] = meta["video"]
+        full = full_lecture(folder)
+        if full:
+            lecture["full"] = full
         lectures.append(lecture)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -124,7 +134,8 @@ def build():
     total = sum(len(l["phrases"]) for l in lectures)
     print(f"{len(lectures)} lecture(s), {total} phrase(s) -> {OUT.relative_to(ROOT)}")
     for l in lectures:
-        print(f"  {l['id']}: {len(l['phrases'])} phrase(s)")
+        full = f", full lecture in {len(l['full'])} part(s)" if l.get("full") else ""
+        print(f"  {l['id']}: {len(l['phrases'])} phrase(s){full}")
     for w in warnings:
         print("WARNING:", w)
 

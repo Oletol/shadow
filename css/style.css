@@ -44,16 +44,16 @@ h3 { font-size: 1.05rem; font-weight: 600; margin: 32px 0 6px; }
 }
 .brand-name { margin: 0; color: var(--ink); font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
 .brand-sub { margin: 0; font-size: 0.92rem; }
-.lecture-select {
-  font: 500 0.95rem var(--sans); color: var(--blue);
-  background: transparent; border: 0; border-bottom: 1px dashed currentColor;
-  padding: 2px 18px 2px 0; margin-top: 2px; max-width: 100%; cursor: pointer;
-  appearance: none; -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%230541f0' stroke-width='1.6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 2px center; background-size: 10px;
+.choosers { display: flex; gap: 12px; align-items: flex-end; flex: 0 1 640px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 260px; }
+.field[hidden] { display: none; }
+.field > label { font-size: 0.84rem; font-weight: 500; color: var(--slate); }
+#lecture-select {
+  font: 500 1rem var(--sans); color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+  padding: 9px 12px; width: 100%; min-width: 0;
 }
-.lecture-select[hidden], .brand-sub[hidden] { display: none; }
-.picker { display: flex; align-items: center; gap: 6px; flex: 0 1 420px; min-width: 0; }
+.picker { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .picker select, .strict select {
   font: inherit; color: var(--ink);
   background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
@@ -67,7 +67,7 @@ h3 { font-size: 1.05rem; font-weight: 600; margin: 32px 0 6px; }
 .icon-btn:hover { border-color: var(--blue); color: var(--blue); }
 .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
-/* ---------- lecture video ---------- */
+/* ---------- full lecture audio ---------- */
 .lecture { margin-bottom: 14px; }
 .lecture > summary {
   cursor: pointer; color: var(--blue); font-weight: 500; width: fit-content;
@@ -76,8 +76,17 @@ h3 { font-size: 1.05rem; font-weight: 600; margin: 32px 0 6px; }
 .lecture > summary::-webkit-details-marker { display: none; }
 .lecture > summary::before { content: "▸"; display: inline-block; margin-right: 8px; transition: transform .2s; }
 .lecture[open] > summary::before { transform: rotate(90deg); }
-.video { margin-top: 10px; aspect-ratio: 16 / 9; border-radius: var(--r); overflow: hidden; background: #000; }
-.video iframe { width: 100%; height: 100%; border: 0; display: block; }
+.lecture[hidden] { display: none; }
+.full {
+  margin-top: 10px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px;
+}
+.full .field { flex: 0 1 260px; }
+#part-select {
+  font: 400 0.95rem var(--sans); color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; width: 100%;
+}
+#full-audio { flex: 1 1 320px; width: 100%; min-width: 0; height: 40px; }
 
 /* ---------- the stage ---------- */
 .stage {
@@ -252,7 +261,8 @@ canvas.spec { width: 100%; height: 120px; display: block; border-radius: 0 0 8px
   .feedback .area { grid-column: 2; }
   .feedback .text { grid-column: 2; }
   .foot { grid-template-columns: 1fr; }
-  .picker { flex-basis: 100%; }
+  .choosers { flex-basis: 100%; }
+  .field { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

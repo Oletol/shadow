@@ -23,7 +23,7 @@ const S = {
   playhead: NaN,
   strictness: store.get('strictness', null),
   refCache: new Map(),
-  lecture: null,     // current lecture { id, title, rutubeId, phrases }
+  lecture: null,     // current lecture { id, title, full: [{title, audio}], phrases }
   lectureIdx: 0
 };
 
@@ -312,6 +312,7 @@ async function toggleRecording() {
     status('This browser cannot record from the microphone. Open the page over HTTPS in Chrome, Edge, Firefox or Safari.', 'error');
     return;
   }
+  fullAudio().pause();
   try {
     audioContext();
     await recorder.start();
@@ -569,7 +570,7 @@ async function loadConfig() {
   try { cfg = await get('data/lectures.json'); }
   catch (_) {
     cfg = await get('data/phrases.json');
-    cfg.lectures = [{ id: 'default', title: cfg.lecture && cfg.lecture.title, rutubeId: cfg.lecture && cfg.lecture.rutubeId, phrases: cfg.phrases }];
+    cfg.lectures = [{ id: 'default', title: cfg.lecture && cfg.lecture.title, phrases: cfg.phrases }];
   }
   try {
     const settings = await get('data/settings.json');
@@ -588,11 +589,7 @@ function selectLecture(li, phraseIdx) {
   $('lecture-select').value = String(S.lectureIdx);
   $('lecture-title').textContent = S.lecture.title || '';
 
-  const lecture = $('lecture');
-  const v = $('video');
-  lecture.hidden = !S.lecture.rutubeId && !S.lecture.video;
-  v.removeAttribute('src');
-  if (lecture.open) loadVideo();
+  setupFullLecture();
 
   const sel = $('phrase-select');
   sel.innerHTML = '';
@@ -606,11 +603,48 @@ function selectLecture(li, phraseIdx) {
   selectPhrase(phraseIdx != null ? phraseIdx : (Number.isFinite(saved) ? saved : 0));
 }
 
-function loadVideo() {
-  const v = $('video');
-  if (v.getAttribute('src')) return;
-  if (S.lecture.rutubeId) v.src = 'https://rutube.ru/play/embed/' + S.lecture.rutubeId;
-  else if (S.lecture.video) v.src = S.lecture.video;
+// ---------------------------------------------------------------------------
+// Full lecture audio (files in assets/<lecture>/full/)
+// ---------------------------------------------------------------------------
+const fullAudio = () => $('full-audio');
+
+function setupFullLecture() {
+  const parts = S.lecture.full || [];
+  const box = $('lecture');
+  const a = fullAudio();
+  a.pause();
+  box.hidden = !parts.length;
+  const sel = $('part-select');
+  sel.innerHTML = '';
+  parts.forEach((p, i) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = p.title;
+    sel.append(o);
+  });
+  $('part-field').hidden = parts.length < 2;
+  if (!parts.length) { a.removeAttribute('src'); return; }
+  const saved = parseInt(store.get('part.' + S.lecture.id, '0'), 10);
+  selectPart(Number.isFinite(saved) && saved < parts.length ? saved : 0);
+}
+
+function selectPart(i) {
+  const parts = S.lecture.full || [];
+  if (!parts[i]) return;
+  const a = fullAudio();
+  $('part-select').value = String(i);
+  store.set('part.' + S.lecture.id, String(i));
+  const key = 'pos.' + parts[i].audio;
+  a.src = parts[i].audio;
+  // continue where the student stopped last time
+  a.onloadedmetadata = () => {
+    const pos = parseFloat(store.get(key, '0'));
+    if (pos > 3 && pos < a.duration - 3) a.currentTime = pos;
+  };
+  let last = 0;
+  a.ontimeupdate = () => {
+    if (Math.abs(a.currentTime - last) > 5) { last = a.currentTime; store.set(key, String(Math.floor(a.currentTime))); }
+  };
 }
 
 async function init() {
@@ -621,6 +655,12 @@ async function init() {
     return;
   }
   const cfg = S.cfg;
+  // ?lecture=<folder name> shows only that lecture (one Moodle page per lecture)
+  const only = new URLSearchParams(location.search).get('lecture');
+  if (only) {
+    const one = cfg.lectures.filter((l) => l.id.toLowerCase() === only.toLowerCase());
+    if (one.length) cfg.lectures = one;
+  }
   if (cfg.title) { $('app-title').textContent = cfg.title; document.title = cfg.title; }
   if (!S.strictness) S.strictness = cfg.strictness || 'standard';
   $('strictness').value = S.strictness;
@@ -632,10 +672,12 @@ async function init() {
     o.textContent = l.title || l.id;
     lsel.append(o);
   });
-  lsel.hidden = cfg.lectures.length < 2;
-  $('lecture-title').hidden = cfg.lectures.length >= 2;
+  $('lecture-field').hidden = cfg.lectures.length < 2;
   lsel.addEventListener('change', () => selectLecture(parseInt(lsel.value, 10)));
-  $('lecture').addEventListener('toggle', () => { if ($('lecture').open) loadVideo(); });
+  $('part-select').addEventListener('change', (e) => selectPart(parseInt(e.target.value, 10)));
+  // only one thing plays at a time
+  fullAudio().addEventListener('play', () => modelAudio.pause());
+  modelAudio.addEventListener('play', () => fullAudio().pause());
 
   const sel = $('phrase-select');
   sel.addEventListener('change', () => selectPhrase(parseInt(sel.value, 10)));
