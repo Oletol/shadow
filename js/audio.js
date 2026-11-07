@@ -68,7 +68,7 @@ export class Recorder {
     const ac = audioContext();
     this.srcNode = ac.createMediaStreamSource(this.stream);
     this.analyser = ac.createAnalyser();
-    this.analyser.fftSize = 1024;
+    this.analyser.fftSize = 2048;
     this.srcNode.connect(this.analyser);
     const data = new Float32Array(this.analyser.fftSize);
     const tick = () => {
@@ -77,7 +77,8 @@ export class Recorder {
       let s = 0;
       for (let i = 0; i < data.length; i++) s += data[i] * data[i];
       const db = 20 * Math.log10(Math.sqrt(s / data.length) + 1e-6);
-      if (this.onLevel) this.onLevel(Math.max(0, Math.min(1, (db + 60) / 50)));
+      // level 0..1 plus the raw frame for the live pitch line
+      if (this.onLevel) this.onLevel(Math.max(0, Math.min(1, (db + 60) / 50)), data, ac.sampleRate);
       this.raf = requestAnimationFrame(tick);
     };
     tick();

@@ -3,7 +3,7 @@
 // word-anchored time alignment; pronunciation uses wav2vec2 CTC letter posteriors.
 
 import { sampleTrack } from './pitch.js';
-import { buildTimeMap, alignWordLists, splitWords } from './align.js';
+import { buildTimeMap, alignWordLists, splitWords, envelopeTimeMap } from './align.js';
 
 export const STRICTNESS = {
   lenient:  { sigma: 4.5, label: 'Lenient' },
@@ -140,7 +140,7 @@ export function compareIntonation(ref, stu, map, strictness = 'standard') {
 
   // per word
   const words = [];
-  if (ref.words && stu.words) {
+  if (ref.words) {
     ref.words.forEach((w, wi) => {
       const rv = [], sv = [];
       times.forEach((t, k) => {
@@ -207,10 +207,11 @@ export function compareIntonation(ref, stu, map, strictness = 'standard') {
 }
 
 /** Timing, pauses and tempo. */
-export function compareRhythm(ref, stu) {
+export function compareRhythm(ref, stu, expectedTempo = 1) {
   const refDur = ref.span[1] - ref.span[0];
   const stuDur = stu.span[1] - stu.span[0];
-  const tempo = stuDur / refDur;
+  // expectedTempo > 1 when the student shadows the speaker played slowly
+  const tempo = stuDur / refDur / expectedTempo;
   const sTempo = 100 * Math.exp(-((Math.log(tempo) / 0.35) ** 2));
   if (!ref.words || !stu.words) {
     return { score: round(sTempo), tempo, refDur, stuDur, words: [], pauses: [] };
@@ -288,7 +289,7 @@ export function compareStress(ref, stu, map) {
 }
 
 /** Pronunciation quality from wav2vec2 letter posteriors, calibrated by the model speaker. */
-export function comparePronunciation(ref, stu) {
+export function comparePronunciation(ref, stu, phon) {
   if (!ref.words || !stu.words) return { score: null, words: [] };
   const words = ref.words.map((rw, i) => {
     const sw = stu.words[i];
@@ -306,8 +307,21 @@ export function comparePronunciation(ref, stu) {
     };
   });
   const totalLetters = words.reduce((s, w) => s + w.word.length, 0) || 1;
-  const score = words.reduce((s, w) => s + w.score * w.word.length, 0) / totalLetters;
-  return { score: round(score), words };
+  let score = words.reduce((s, w) => s + w.score * w.word.length, 0) / totalLetters;
+  // the phoneme comparison (IPA) is more precise: when present it carries 60%
+  if (phon && phon.score != null) {
+    words.forEach((w, i) => {
+      const pw = phon.words[i];
+      if (!pw) return;
+      w.ipaRef = pw.ref.join('');
+      w.ipaStu = pw.stu.join('');
+      w.phonItems = pw.items;
+      w.issues = pw.issues;
+      if (pw.score != null) { w.letterScore = w.score; w.score = round(0.4 * w.score + 0.6 * pw.score); }
+    });
+    score = 0.4 * score + 0.6 * phon.score;
+  }
+  return { score: round(score), words, phonemes: !!(phon && phon.score != null) };
 }
 
 /** Did the student say the right words? Uses the Whisper transcript. */
@@ -321,29 +335,32 @@ export function compareWords(target, whisperText, acousticText) {
 }
 
 export function compareAll(ref, stu, opts = {}) {
-  const map = (ref.words && stu.words)
+  const melodyOnly = opts.mode === 'melody';
+  const haveWords = !melodyOnly && ref.words && stu.words;
+  const map = haveWords
     ? buildTimeMap(ref.words, stu.words, ref.span, stu.span)
-    : (t) => stu.span[0] + (t - ref.span[0]) * (stu.span[1] - stu.span[0]) / (ref.span[1] - ref.span[0]);
-  const intonation = compareIntonation(ref, stu, map, opts.strictness);
-  const rhythm = compareRhythm(ref, stu);
-  const stress = compareStress(ref, stu, map);
-  const pron = comparePronunciation(ref, stu);
-  const words = compareWords(opts.target || '', opts.whisperText, opts.acousticText);
+    : envelopeTimeMap(ref.pitch, stu.pitch, ref.span, stu.span);
+  const refW = haveWords ? ref : { ...ref, words: melodyOnly ? null : ref.words };
+  const stuW = haveWords ? stu : { ...stu, words: null };
+  const intonation = compareIntonation(melodyOnly ? { ...ref, words: ref.words } : refW, melodyOnly ? { ...stu, words: null } : stuW, map, opts.strictness);
+  const rhythm = compareRhythm(haveWords ? ref : { ...ref, words: null }, stuW, opts.expectedTempo || 1);
+  const empty = { score: null, words: [] };
+  const stress = melodyOnly ? empty : compareStress(ref, stu, map);
+  const pron = melodyOnly ? empty : comparePronunciation(ref, stu, opts.phonemes);
+  const words = melodyOnly ? compareWords(opts.target || '', null, null) : compareWords(opts.target || '', opts.whisperText, opts.acousticText);
 
-  const parts = [
-    ['intonation', intonation.score, 0.40],
-    ['pronunciation', pron.score, 0.30],
-    ['rhythm', rhythm.score, 0.15],
-    ['stress', stress.score, 0.15]
-  ].filter(([, s]) => s != null);
-  const wsum = parts.reduce((s, p) => s + p[2], 0) || 1;
-  let overall = parts.reduce((s, p) => s + p[1] * p[2], 0) / wsum;
-  let capped = false;
+  const parts = melodyOnly
+    ? [['intonation', intonation.score, 0.8], ['rhythm', rhythm.score, 0.2]]
+    : [['intonation', intonation.score, 0.40], ['pronunciation', pron.score, 0.30], ['rhythm', rhythm.score, 0.15], ['stress', stress.score, 0.15]];
+  const used = parts.filter(([, s]) => s != null);
+  const wsum = used.reduce((s, p) => s + p[2], 0) || 1;
+  let overall = used.reduce((s, p) => s + p[1] * p[2], 0) / wsum;
+  let capped = false, cappedByMelody = false;
   // The goal is to reproduce the model's melody: a clearly different intonation
   // cannot be compensated by good sounds.
-  if (intonation.score != null && overall > intonation.score + 20) overall = intonation.score + 20;
-  if (words.accuracy != null && words.accuracy < 0.6) { overall = Math.min(overall, 45); capped = true; }
-  return { overall: round(overall), capped, intonation, rhythm, stress, pronunciation: pron, words, map };
+  if (!melodyOnly && intonation.score != null && overall > intonation.score + 20) { overall = intonation.score + 20; cappedByMelody = true; }
+  if (!melodyOnly && words.accuracy != null && words.accuracy < 0.6) { overall = Math.min(overall, 45); capped = true; }
+  return { overall: round(overall), capped, cappedByMelody, mode: melodyOnly ? 'melody' : 'speech', intonation, rhythm, stress, pronunciation: pron, words, map };
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +420,12 @@ export function buildFeedback(res) {
   }
 
   // Pronunciation
+  if (P.phonemes) {
+    let n = 0;
+    P.words.forEach((w) => (w.issues || []).forEach((iss) => {
+      if (n++ < 5) push(iss.kind === 'vowel' || iss.kind.startsWith('vowel') ? 'warn' : 'bad', 'Sounds', `“${w.word}”: ${iss.text}`, w.word);
+    }));
+  }
   if (P.score != null) {
     const weak = P.words.filter((w) => w.score < 60).sort((a, b) => a.score - b.score);
     weak.slice(0, 3).forEach((w) => {
@@ -410,7 +433,8 @@ export function buildFeedback(res) {
       const heard = w.heard && w.heard !== w.word ? ` The acoustic model heard “${w.heard}”.` : '';
       push('bad', 'Pronunciation', `“${w.word}” is not clear yet (${w.score}/100).${heard}${letters}`, w.word);
     });
-    if (!weak.length) push('good', 'Pronunciation', 'Every word was pronounced clearly.');
+    const anyIssues = P.words.some((w) => w.issues && w.issues.length);
+    if (!weak.length && !anyIssues) push('good', 'Pronunciation', 'Every word was pronounced clearly.');
   }
 
   // Rhythm

@@ -62,6 +62,22 @@
         <p class="stave-msg" id="stave-msg">Loading the speaker’s recording…</p>
       </div>
 
+      <div class="steps" role="radiogroup" aria-label="Practice step">
+        <button class="step" type="button" role="radio" data-mode="melody" aria-checked="false">
+          <span class="step-n">1</span><span class="step-name">Melody</span><span class="step-best" data-best="melody"></span>
+        </button>
+        <button class="step" type="button" role="radio" data-mode="slow" aria-checked="false">
+          <span class="step-n">2</span><span class="step-name">Shadow slowly</span><span class="step-best" data-best="slow"></span>
+        </button>
+        <button class="step" type="button" role="radio" data-mode="shadow" aria-checked="false">
+          <span class="step-n">3</span><span class="step-name">Shadow</span><span class="step-best" data-best="shadow"></span>
+        </button>
+        <button class="step" type="button" role="radio" data-mode="own" aria-checked="false">
+          <span class="step-n">4</span><span class="step-name">On your own</span><span class="step-best" data-best="own"></span>
+        </button>
+      </div>
+      <p class="step-tip" id="step-tip"></p>
+
       <div class="controls">
         <div class="btn-group">
           <button class="btn btn-model" id="btn-listen" type="button">
@@ -69,6 +85,10 @@
             <span>Listen</span>
           </button>
           <button class="btn btn-quiet" id="btn-slow" type="button">Listen slowly</button>
+          <button class="btn btn-quiet" id="btn-loop" type="button" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l4 4-4 4V7H7a3 3 0 00-3 3v1H2v-1a5 5 0 015-5h10V2zM7 22l-4-4 4-4v3h10a3 3 0 003-3v-1h2v1a5 5 0 01-5 5H7v3z"/></svg>
+            <span id="loop-label">Loop the ending</span>
+          </button>
         </div>
         <div class="btn-group">
           <button class="btn btn-record" id="btn-record" type="button">
@@ -77,10 +97,6 @@
           </button>
           <span class="meter" aria-hidden="true"><span id="level"></span></span>
         </div>
-        <label class="toggle">
-          <input type="checkbox" id="shadow-mode">
-          <span>Play the speaker while I record</span>
-        </label>
       </div>
       <p class="status" id="status" role="status" aria-live="polite"></p>
       <p class="ref-note" id="ref-note" hidden></p>
@@ -103,10 +119,18 @@
       <div class="table-wrap word-part">
         <table class="words">
           <thead>
-            <tr><th scope="col">Word</th><th scope="col">Sounds</th><th scope="col">Melody: speaker / you</th><th scope="col">Length</th></tr>
+            <tr><th scope="col">Word</th><th scope="col" class="col-sounds">Sounds</th><th scope="col" class="col-ipa">IPA: speaker / you</th><th scope="col">Melody: speaker / you</th><th scope="col">Length</th></tr>
           </thead>
           <tbody id="word-rows"></tbody>
         </table>
+      </div>
+
+      <div class="ipa-offer" id="ipa-offer" hidden>
+        <div>
+          <p class="ipa-title">Check every sound in IPA</p>
+          <p class="ipa-text">Compares your sounds with the speaker’s one by one: vowels, “th”, r after vowels, t between vowels, extra vowels at the end of words. The first time, the browser downloads a sound model of about 330 MB.</p>
+        </div>
+        <button class="btn btn-ipa" id="btn-ipa" type="button">Check sounds in IPA</button>
       </div>
 
       <h3>What to work on</h3>
@@ -136,11 +160,12 @@
     <section class="howto" aria-labelledby="howto-h">
       <h2 id="howto-h">How to practise</h2>
       <ol>
-        <li>Listen two or three times. Follow the blue melody line with your eyes.</li>
-        <li>Say the phrase together with the speaker in a whisper.</li>
-        <li>Record your voice. Use headphones if the speaker plays while you record.</li>
-        <li>Compare the orange line with the blue one, fix one thing, record again.</li>
+        <li><strong>Melody.</strong> Listen two or three times, then hum the tune on “mm” or “da-da”. Only the melody is scored. Move on when it reaches 80.</li>
+        <li><strong>Shadow slowly.</strong> The speaker plays at three-quarter speed and you speak at the same time. Wear headphones.</li>
+        <li><strong>Shadow.</strong> The same at normal speed.</li>
+        <li><strong>On your own.</strong> Say the phrase without the speaker. Then check the sounds in IPA and fix one thing at a time.</li>
       </ol>
+      <p class="howto-note">While you record, your voice is drawn live as an orange line over the speaker’s blue melody. Try to keep the two lines together.</p>
     </section>
   </main>
 
@@ -148,6 +173,7 @@
     <div class="models" id="models">
       <p><span class="dot" id="dot-ctc"></span>Sound analysis model: <span id="st-ctc">waiting</span></p>
       <p><span class="dot" id="dot-asr"></span>Speech recogniser: <span id="st-asr">waiting</span></p>
+      <p><span class="dot" id="dot-phon"></span>IPA sound model: <span id="st-phon">loads on request</span></p>
     </div>
     <label class="strict">Scoring
       <select id="strictness">

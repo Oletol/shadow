@@ -97,6 +97,23 @@ export function drawStave(canvas, d) {
   }
   if (d.stu) drawLine(g, toPts(d.stu), stuCol, 3);
 
+  // live pitch while recording: {t, st} points, broken where the voice stops
+  if (d.live && d.live.length) {
+    const pts = [];
+    let prevT = -Infinity;
+    for (const p of d.live) {
+      if (p.t - prevT > 0.09) pts.push(null);
+      if (p.t >= t0 - 0.3 && p.t <= t1 + 0.5) pts.push({ x: X(Math.min(p.t, t1 + 0.4)), y: Y(p.st) });
+      prevT = p.t;
+    }
+    drawLine(g, pts, stuCol, 3, false);
+    const last = d.live[d.live.length - 1];
+    if (last && last.t >= t0 - 0.3) {
+      g.fillStyle = stuCol;
+      g.beginPath(); g.arc(X(Math.min(last.t, t1 + 0.4)), Y(last.st), 5, 0, Math.PI * 2); g.fill();
+    }
+  }
+
   // word labels under their stretch of melody
   if (d.words) {
     g.textBaseline = 'alphabetic';

@@ -6,5 +6,6 @@
     "alignment": "Xenova/wav2vec2-base-960h",
     "recognition": "Xenova/whisper-base.en",
     "host": null
-  }
+  },
+  "phonemes": "on-request"
 }

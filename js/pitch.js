@@ -219,3 +219,41 @@ export function sampleTrack(track, hop, t0, t) {
   const fr = pos - i0;
   return a * (1 - fr) + b * fr;
 }
+
+/**
+ * F0 of a single short frame (for the live pitch line while recording).
+ * @returns Hz or 0 when the frame is unvoiced or silent.
+ */
+export function yinFrameHz(x, sr, fmin = 65, fmax = 500, threshold = 0.15) {
+  const maxLag = Math.min(Math.ceil(sr / fmin), Math.floor(x.length / 2));
+  const minLag = Math.floor(sr / fmax);
+  const W = x.length - maxLag;
+  if (W < 64 || maxLag <= minLag) return 0;
+  let e = 0;
+  for (let i = 0; i < x.length; i++) e += x[i] * x[i];
+  if (Math.sqrt(e / x.length) < 0.004) return 0;
+  const dn = new Float32Array(maxLag + 2);
+  let running = 0;
+  dn[0] = 1;
+  for (let tau = 1; tau <= maxLag; tau++) {
+    let s = 0;
+    for (let j = 0; j < W; j++) { const d = x[j] - x[j + tau]; s += d * d; }
+    running += s;
+    dn[tau] = running > 0 ? s * tau / running : 1;
+  }
+  let tauEst = -1;
+  for (let tau = minLag; tau <= maxLag; tau++) {
+    if (dn[tau] < threshold) {
+      while (tau + 1 <= maxLag && dn[tau + 1] < dn[tau]) tau++;
+      tauEst = tau; break;
+    }
+  }
+  if (tauEst < 0) return 0;
+  let bt = tauEst;
+  if (tauEst > 1 && tauEst < maxLag) {
+    const a = dn[tauEst - 1], b = dn[tauEst], c = dn[tauEst + 1], den = a - 2 * b + c;
+    if (Math.abs(den) > 1e-9) bt = tauEst + 0.5 * (a - c) / den;
+  }
+  const hz = sr / bt;
+  return hz >= fmin && hz <= fmax ? hz : 0;
+}

@@ -4,6 +4,22 @@ import { buildAnalysis } from './analysis.js';
 import { compareAll, buildFeedback, verdict, STRICTNESS } from './scoring.js';
 import { drawStave, drawWave, drawSpectrogram } from './charts.js';
 import { splitWords } from './align.js';
+import { yinFrameHz } from './pitch.js';
+import { comparePhonemes } from './phonemes.js';
+
+// Practice steps (a sequence: melody first, then shadowing, then alone)
+const MODES = {
+  melody: { record: 'Hum the melody', play: false, rate: 1, scoring: 'melody',
+    tip: 'Listen two or three times, then hum the tune on “mm” or “da-da”. Only the melody is scored here.' },
+  slow: { record: 'Shadow at ¾ speed', play: true, rate: 0.75, scoring: 'speech',
+    tip: 'The speaker plays at three-quarter speed while you speak at the same time. Wear headphones.' },
+  shadow: { record: 'Shadow', play: true, rate: 1, scoring: 'speech',
+    tip: 'The speaker plays at normal speed while you speak at the same time. Wear headphones.' },
+  own: { record: 'Record', play: false, rate: 1, scoring: 'speech',
+    tip: 'Say the phrase on your own, without the speaker. Then check your sounds in IPA.' }
+};
+const MODE_ORDER = ['melody', 'slow', 'shadow', 'own'];
+const PASS = 80;
 
 const $ = (id) => document.getElementById(id);
 const LS = 'shadowing.v3.';
@@ -24,8 +40,12 @@ const S = {
   strictness: store.get('strictness', null),
   refCache: new Map(),
   lecture: null,     // current lecture { id, title, full: [{title, audio}], phrases }
-  lectureIdx: 0
+  lectureIdx: 0,
+  mode: store.get('mode', 'melody'),
+  live: null,         // live pitch points while recording
+  loop: null          // stop() of the running loop
 };
+if (!MODES[S.mode]) S.mode = 'melody';
 
 // ---------------------------------------------------------------------------
 // Model worker
@@ -36,7 +56,7 @@ function deferred() {
   p.catch(() => {});
   return { p, resolve, reject, state: 'pending' };
 }
-const models = { ctc: deferred(), asr: deferred() };
+const models = { ctc: deferred(), asr: deferred(), phon: deferred() };
 let worker = null, msgId = 0;
 const pending = new Map();
 
@@ -58,10 +78,12 @@ function startWorker(cfg) {
       const pct = m.total ? Math.round(100 * m.loaded / m.total) : 0;
       setModelStatus(m.model, 'loading', `downloading ${pct}%`);
       if (m.model === 'ctc' && S.waitingForModel) showProgress('Preparing the sound analysis model (first time only)', pct);
+      if (m.model === 'phon' && S.waitingForPhon) showProgress('Downloading the IPA sound model (first time only)', pct);
     } else if (m.type === 'ready') {
       models[m.model].state = 'ready';
       models[m.model].resolve(true);
       setModelStatus(m.model, 'ready', 'ready');
+      if (m.model === 'phon') store.set('phonLoaded', '1');
     } else if (m.type === 'load-error') {
       models[m.model].state = 'failed';
       models[m.model].reject(new Error(m.error));
@@ -76,7 +98,7 @@ function startWorker(cfg) {
   };
   worker.onerror = (e) => {
     console.error(e);
-    ['ctc', 'asr'].forEach((k) => {
+    ['ctc', 'asr', 'phon'].forEach((k) => {
       if (models[k].state === 'pending') { models[k].state = 'failed'; models[k].reject(new Error('worker failed')); setModelStatus(k, 'failed', 'could not start'); }
     });
   };
@@ -88,6 +110,23 @@ function startWorker(cfg) {
   setModelStatus('ctc', 'loading', 'starting');
   setModelStatus('asr', 'loading', 'waiting');
   worker.postMessage({ type: 'load' });
+  // the IPA model is large: load it only on request, or straight away if this
+  // browser already has it (or the teacher switched it on for everyone)
+  if (cfg.phonemes === 'auto' || store.get('phonLoaded', '0') === '1') requestPhon();
+}
+
+let phonRequested = false;
+function requestPhon() {
+  if (phonRequested || !worker) return;
+  phonRequested = true;
+  setModelStatus('phon', 'loading', 'starting');
+  worker.postMessage({ type: 'load-phon' });
+}
+async function runPhon(samples) {
+  requestPhon();
+  await models.phon.p;
+  const r = await callWorker('phon', samples);
+  return { ...r, frameSec: samples.length / SR / r.T };
 }
 
 function callWorker(type, audio) {
@@ -158,6 +197,7 @@ async function selectPhrase(idx) {
   S.ref = null;
   $('stave-msg').textContent = 'Loading the speaker’s recording…';
   renderStave();
+  renderSteps();
   status('');
 
   try {
@@ -221,6 +261,7 @@ function staveData() {
     times.push(t); vals.push(P.st[i]);
   }
   const d = { times, ref: vals, span: A.span, words: A.words, highlight: S.highlight, playhead: S.playhead };
+  if (S.live) { d.live = S.live; return d; }
   const R = S.result;
   if (R && R.intonation && R.intonation.ok) {
     // student line, already on the speaker's time axis
@@ -282,7 +323,10 @@ function playWord(i) {
   const A = refAnalysis();
   if (!A || !A.words || !A.words[i]) return;
   if (stopWordPlayback) stopWordPlayback();
+  stopLoop();
   S.highlight = i;
+  S.loopWord = i;
+  updateLoopLabel();
   renderStave();
   const w = A.words[i];
   const stuA = S.stu && S.stu.analysis;
@@ -303,8 +347,41 @@ function playWord(i) {
 // ---------------------------------------------------------------------------
 // Recording
 // ---------------------------------------------------------------------------
-const recorder = new Recorder((lvl) => { $('level').style.width = Math.round(lvl * 100) + '%'; });
+const recorder = new Recorder(onMicFrame);
 let autoStopTimer = 0;
+let liveState = null;
+
+function onMicFrame(lvl, data, sr) {
+  $('level').style.width = Math.round(lvl * 100) + '%';
+  if (!liveState || !recorder.recording || !data) return;
+  // downsample to about 16 kHz and estimate the pitch of this frame
+  const f = Math.max(1, Math.round(sr / 16000));
+  const n = Math.floor(data.length / f);
+  const x = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s2 = 0; for (let k = 0; k < f; k++) s2 += data[i * f + k]; x[i] = s2 / f; }
+  const hz = yinFrameHz(x, sr / f, 70, 420);
+  if (!hz) { renderStave(); return; }
+  const A = refAnalysis();
+  const now = performance.now();
+  let t;
+  if (MODES[liveState.mode].play) t = modelAudio.currentTime;            // speaker's timeline
+  else {
+    if (liveState.start == null) liveState.start = now;
+    t = (A ? A.span[0] : 0) + (now - liveState.start) / 1000;
+  }
+  if (!liveState.median) {
+    liveState.first.push(hz);
+    if (liveState.first.length < 12) return;
+    const v = [...liveState.first].sort((a2, b2) => a2 - b2);
+    liveState.median = v[v.length >> 1];
+  }
+  const st = 12 * Math.log2(hz / liveState.median);
+  const prev = S.live[S.live.length - 1];
+  // ignore octave jumps of single frames
+  if (prev && Math.abs(st - prev.st) > 7 && t - prev.t < 0.05) return;
+  S.live.push({ t, st });
+  renderStave();
+}
 
 async function toggleRecording() {
   if (recorder.recording) return stopRecording();
@@ -313,6 +390,7 @@ async function toggleRecording() {
     return;
   }
   fullAudio().pause();
+  stopLoop();
   try {
     audioContext();
     await recorder.start();
@@ -320,16 +398,24 @@ async function toggleRecording() {
     status('Microphone access was blocked. Allow the microphone for this site and try again.', 'error');
     return;
   }
+  const mode = S.mode;
+  const M = MODES[mode];
+  S.recMode = mode;
+  S.result = null;
+  S.live = [];
+  const savedMedian = parseFloat(store.get('voiceMedian', '0'));
+  liveState = { mode, start: null, first: [], median: savedMedian > 50 ? savedMedian : 0 };
+  $('results').hidden = true;
   $('btn-record').classList.add('is-recording');
   $('record-label').textContent = 'Stop';
-  status('Recording… say the phrase, then press Stop.');
-  if ($('shadow-mode').checked) {
-    listen(1);
+  status(M.play ? 'Recording… speak together with the speaker.' : mode === 'melody' ? 'Recording… hum the melody, then press Stop.' : 'Recording… say the phrase, then press Stop.');
+  clearTimeout(autoStopTimer);
+  if (M.play) {
+    listen(M.rate);
     modelAudio.onended = () => { clearTimeout(autoStopTimer); autoStopTimer = setTimeout(stopRecording, 1200); };
   } else {
     modelAudio.onended = null;
   }
-  clearTimeout(autoStopTimer);
   autoStopTimer = setTimeout(() => recorder.recording && stopRecording(), 20000);
 }
 
@@ -337,14 +423,16 @@ async function stopRecording() {
   clearTimeout(autoStopTimer);
   modelAudio.onended = null;
   const blob = await recorder.stop();
+  if (MODES[S.recMode] && MODES[S.recMode].play) modelAudio.pause();
+  liveState = null;
   $('btn-record').classList.remove('is-recording');
-  $('record-label').textContent = 'Record again';
+  $('record-label').textContent = MODES[S.mode].record;
   $('level').style.width = '0';
   if (!blob || !blob.size) { status('Nothing was recorded. Check the microphone.', 'error'); return; }
   try {
     const samples = await decodeTo16k(await blob.arrayBuffer());
     if (S.stu && S.stu.url) URL.revokeObjectURL(S.stu.url);
-    S.stu = { samples, analysis: null, whisper: null, url: URL.createObjectURL(blob) };
+    S.stu = { samples, analysis: null, whisper: null, phon: null, mode: S.recMode, url: URL.createObjectURL(blob) };
     await analyseStudent();
   } catch (e) {
     console.error(e);
@@ -357,8 +445,12 @@ function clearStudent() {
   S.stu = null;
   S.result = null;
   S.highlight = null;
+  S.live = null;
+  S.loopWord = null;
+  stopLoop();
+  updateLoopLabel();
   $('results').hidden = true;
-  $('record-label').textContent = 'Record';
+  $('record-label').textContent = MODES[S.mode].record;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +465,18 @@ async function analyseStudent() {
   // quick check: is there any voice?
   const quick = buildAnalysis(S.stu.samples, p.text, null);
   if (quick.pitch.voicedRatio < 0.03 || quick.span[1] - quick.span[0] < 0.25) {
-    status('No speech was heard in your recording. Check that the right microphone is selected and speak a little louder.', 'error');
+    S.live = null; renderStave();
+    status('No voice was heard in your recording. Check that the right microphone is selected and speak a little louder.', 'error');
+    return;
+  }
+  store.set('voiceMedian', String(Math.round(quick.pitch.median)));
+
+  // humming: only the melody is compared, no speech models needed
+  if (S.stu.mode === 'melody') {
+    S.stu.analysis = quick;
+    S.live = null;
+    computeAndRender();
+    status('Done. When the melody reaches ' + PASS + ', move on to step 2.');
     return;
   }
 
@@ -398,6 +501,7 @@ async function analyseStudent() {
   }
   if (token !== S.token || !S.stu) return;
   S.stu.analysis = stuA;
+  S.live = null;
   computeAndRender();
 
   const partial = !(refAnalysis().words && stuA.words);
@@ -417,20 +521,126 @@ async function analyseStudent() {
       if (!partial) status('Done. The speech recogniser is not available, so words were checked by sound only.');
     }
   }
+  // IPA comparison runs by itself once its model is in this browser
+  if (!partial && models.phon.state === 'ready') runIpa(true);
+}
+
+async function runIpa(quiet) {
+  const token = S.token;
+  const ref = S.ref, stu = S.stu;
+  const refA = refAnalysis();
+  if (!ref || !stu || !stu.analysis || !refA || !refA.words) return;
+  const btn = $('btn-ipa');
+  btn.disabled = true;
+  try {
+    S.waitingForPhon = models.phon.state !== 'ready';
+    if (S.waitingForPhon) showProgress('Downloading the IPA sound model (first time only)', 0);
+    else if (!quiet) status('Comparing your sounds with the speaker…');
+    if (!ref.phon) ref.phon = await runPhon(ref.samples);
+    S.waitingForPhon = false;
+    if (!quiet) status('Comparing your sounds with the speaker…');
+    const sp = await runPhon(stu.samples);
+    if (token !== S.token || stu !== S.stu) return;
+    stu.phon = comparePhonemes(ref.phon, sp, sp.id2sym, refA.words, sp.blank);
+    computeAndRender();
+    status(stu.phon ? 'Done. The table now shows the sounds of each word in IPA.' : 'The speaker’s sounds could not be recognised in IPA.');
+  } catch (e) {
+    S.waitingForPhon = false;
+    console.warn(e);
+    status('The IPA sound check is not available right now: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function computeAndRender() {
   const refA = refAnalysis();
   if (!refA || !S.stu || !S.stu.analysis) return;
   const strictness = S.strictness || S.cfg.strictness || 'standard';
+  const M = MODES[S.stu.mode] || MODES.own;
   S.result = compareAll(refA, S.stu.analysis, {
     strictness,
+    mode: M.scoring,
+    expectedTempo: M.play ? 1 / M.rate : 1,
     target: phrase().text,
     whisperText: S.stu.whisper,
-    acousticText: S.stu.analysis.acoustic
+    acousticText: S.stu.analysis.acoustic,
+    phonemes: S.stu.phon
   });
+  saveBest(S.stu.mode, S.result.overall);
   renderResults();
   renderStave();
+}
+
+// ---------------------------------------------------------------------------
+// Practice steps and best scores
+// ---------------------------------------------------------------------------
+const bestKey = (mode) => 'best.' + phrase().audio + '.' + mode;
+function saveBest(mode, score) {
+  if (score == null || !S.lecture) return;
+  const prev = parseInt(store.get(bestKey(mode), '-1'), 10);
+  if (score > prev) store.set(bestKey(mode), String(score));
+  renderSteps();
+}
+function renderSteps() {
+  if (!S.lecture) return;
+  document.querySelectorAll('.step').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === S.mode)));
+  document.querySelectorAll('[data-best]').forEach((el) => {
+    const v = parseInt(store.get(bestKey(el.dataset.best), '-1'), 10);
+    el.textContent = v >= 0 ? String(v) : '';
+    el.classList.toggle('passed', v >= PASS);
+    el.title = v >= 0 ? 'Your best score for this step' : '';
+  });
+  $('step-tip').textContent = MODES[S.mode].tip;
+  if (!recorder.recording) $('record-label').textContent = MODES[S.mode].record;
+}
+function setMode(mode) {
+  if (!MODES[mode] || recorder.recording) return;
+  S.mode = mode;
+  store.set('mode', mode);
+  renderSteps();
+}
+
+// ---------------------------------------------------------------------------
+// Loop a word or the ending of the phrase (speaker only)
+// ---------------------------------------------------------------------------
+function loopRange() {
+  const A = refAnalysis();
+  if (!A) return null;
+  if (A.words && S.loopWord != null && A.words[S.loopWord]) {
+    const w = A.words[S.loopWord];
+    return [Math.max(0, w.start - 0.06), w.end + 0.08];
+  }
+  const R = S.result && S.result.intonation;
+  let from = A.span[0] + (A.span[1] - A.span[0]) * 0.55;
+  if (A.words && A.words.length) from = A.words[A.words.length - 1].start - 0.05;
+  if (R && Number.isFinite(R.nucStart)) from = R.nucStart - 0.05;
+  return [Math.max(0, from), A.span[1]];
+}
+function updateLoopLabel() {
+  const A = refAnalysis();
+  const w = A && A.words && S.loopWord != null && A.words[S.loopWord];
+  $('loop-label').textContent = S.loop ? 'Stop the loop' : w ? `Loop “${w.word}”` : 'Loop the ending';
+  $('btn-loop').setAttribute('aria-pressed', String(!!S.loop));
+}
+function stopLoop() {
+  if (S.loop) { S.loop(); S.loop = null; }
+  if ($('btn-loop')) updateLoopLabel();
+}
+function toggleLoop() {
+  if (S.loop) return stopLoop();
+  const A = refAnalysis();
+  const r = loopRange();
+  if (!A || !r) return;
+  modelAudio.pause();
+  let stopped = false, stopCur = () => {}, timer = 0;
+  const play = () => {
+    if (stopped) return;
+    stopCur = playSamples(A.samples, r[0], r[1], () => { if (!stopped) timer = setTimeout(play, 700); });
+  };
+  play();
+  S.loop = () => { stopped = true; clearTimeout(timer); stopCur(); };
+  updateLoopLabel();
 }
 
 // ---------------------------------------------------------------------------
@@ -471,9 +681,16 @@ function renderResults() {
   $('results').hidden = false;
   $('overall-num').textContent = R.overall;
   $('verdict').textContent = verdict(R.overall);
+  const melodyOnly = R.mode === 'melody';
+  const mi = MODE_ORDER.indexOf(S.stu.mode);
+  const nextStep = mi >= 0 && mi < MODE_ORDER.length - 1 ? MODE_ORDER[mi + 1] : null;
+  const stepName = { melody: 'Melody', slow: 'Shadow slowly', shadow: 'Shadow', own: 'On your own' };
   let sub = 'Melody carries the most weight in this score, then the clarity of sounds.';
+  if (melodyOnly) sub = 'Only the melody and timing of your humming were compared.';
   if (R.capped) sub = 'Some words of the phrase were missing or different, so the score is limited. Say the whole phrase.';
-  else if (R.intonation.ok && R.overall === R.intonation.score + 20) sub = 'Your melody is different from the speaker’s, so good sounds cannot raise the score further.';
+  else if (R.cappedByMelody) sub = 'Your melody is different from the speaker’s, so good sounds cannot raise the score further.';
+  if (R.overall >= PASS && nextStep) sub += ` Step passed: go on to “${stepName[nextStep]}”.`;
+  else if (R.overall < PASS) sub += ` Aim for ${PASS} before the next step.`;
   $('verdict-sub').textContent = sub;
 
   // meters
@@ -482,9 +699,10 @@ function renderResults() {
     : R.rhythm.tempo < 0.92 ? `${Math.round((1 - R.rhythm.tempo) * 100)}% faster than the speaker` : 'Same speed as the speaker';
   const meters = [
     ['Melody', I.score, I.ok ? `Your pitch line is on average ${I.rmse.toFixed(1)} semitones from the speaker’s` : 'Not enough voice to compare', true],
-    ['Sounds', R.pronunciation.score, R.pronunciation.score != null ? 'How clearly each sound of each word came through' : 'Needs the sound analysis model'],
+    ['Sounds', R.pronunciation.score, melodyOnly ? 'Not checked when humming' : R.pronunciation.score == null ? 'Needs the sound analysis model'
+      : R.pronunciation.phonemes ? 'Each sound compared with the speaker in IPA' : 'How clearly each sound came through; check in IPA for detail'],
     ['Rhythm', R.rhythm.score, tempoNote],
-    ['Stress', R.stress.score, R.stress.score != null ? 'Which words stand out and where' : 'Needs the sound analysis model']
+    ['Stress', R.stress.score, melodyOnly ? 'Not checked when humming' : R.stress.score != null ? 'Which words stand out and where' : 'Needs the sound analysis model']
   ];
   $('meters').innerHTML = meters.map(([name, score, note, main]) => `
     <div class="m is-${level(score)}${main ? ' is-main' : ''}">
@@ -507,11 +725,16 @@ function renderResults() {
       len = `<span class="pill ${lbl[1]}">${lbl[0]}</span>`;
     }
     const btn = A.words ? `<button class="word-btn" type="button" data-word="${i}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>${esc(w.word)}</button>` : esc(w.word);
-    return `<tr><td>${btn}</td><td>${sounds}</td><td>${melody}</td><td>${len}</td></tr>`;
+    const ipa = pw && pw.phonItems ? ipaHtml(pw.phonItems) : '–';
+    return `<tr><td>${btn}</td><td class="col-sounds">${sounds}</td><td class="col-ipa">${ipa}</td><td>${melody}</td><td>${len}</td></tr>`;
   });
   $('word-rows').innerHTML = rows.join('');
-  const hasWords = !!(A.words && S.stu.analysis.words);
+  const table = $('word-rows').closest('table');
+  table.classList.toggle('no-ipa', !R.pronunciation.phonemes);
+  table.classList.toggle('melody-only', melodyOnly);
+  const hasWords = !!(A.words && (melodyOnly || S.stu.analysis.words));
   document.querySelectorAll('.word-part').forEach((el) => { el.hidden = !hasWords; });
+  $('ipa-offer').hidden = melodyOnly || !!R.pronunciation.phonemes || !(A.words && S.stu.analysis.words) || models.phon.state === 'failed';
 
   // feedback
   const fb = buildFeedback(R);
@@ -548,6 +771,15 @@ function renderResults() {
   nums.push(['Scoring', (STRICTNESS[S.strictness || S.cfg.strictness] || STRICTNESS.standard).label]);
   $('numbers').innerHTML = nums.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
   if ($('results').querySelector('details.more').open) drawPictures();
+}
+
+/** Speaker and student IPA with the differing sounds marked. */
+function ipaHtml(items) {
+  const refPart = items.filter((it) => it.ref).map((it) =>
+    it.type === 'match' ? esc(it.ref) : `<span class="${it.type === 'del' ? 'gone' : 'x'}">${esc(it.ref)}</span>`).join('');
+  const stuPart = items.filter((it) => it.stu).map((it) =>
+    it.type === 'match' ? esc(it.stu) : `<span class="x">${esc(it.stu)}</span>`).join('');
+  return `<span class="ipa"><span title="Speaker">/${refPart}/</span><span class="you" title="You">/${stuPart || '–'}/</span></span>`;
 }
 
 function drawPictures() {
@@ -683,9 +915,12 @@ async function init() {
   sel.addEventListener('change', () => selectPhrase(parseInt(sel.value, 10)));
   $('prev').addEventListener('click', () => selectPhrase(S.idx - 1));
   $('next').addEventListener('click', () => selectPhrase(S.idx + 1));
-  $('btn-listen').addEventListener('click', () => listen(1));
-  $('btn-slow').addEventListener('click', () => listen(0.75));
+  $('btn-listen').addEventListener('click', () => { stopLoop(); listen(1); });
+  $('btn-slow').addEventListener('click', () => { stopLoop(); listen(0.75); });
   $('btn-record').addEventListener('click', toggleRecording);
+  $('btn-loop').addEventListener('click', toggleLoop);
+  $('btn-ipa').addEventListener('click', () => runIpa(false));
+  document.querySelectorAll('.step').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
   $('btn-mine').addEventListener('click', () => { if (S.stu) playSamples(S.stu.samples); });
   $('strictness').addEventListener('change', (e) => {
     S.strictness = e.target.value;

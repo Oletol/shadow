@@ -263,3 +263,65 @@ export function buildTimeMap(refWords, stuWords, refSpan, stuSpan) {
     return last[1] + (t - last[0]);
   };
 }
+
+/**
+ * Time map from the speaker to the student found by dynamic time warping of the
+ * loudness envelopes (10 ms frames). Used for humming and when word alignment
+ * is not available. Pitch is deliberately NOT used, so the melody comparison
+ * stays fair.
+ */
+export function envelopeTimeMap(refP, stuP, refSpan, stuSpan) {
+  const seg = (p, span) => {
+    const a = Math.max(0, Math.floor((span[0] - p.t0) / p.hop));
+    const b = Math.min(p.rms.length - 1, Math.ceil((span[1] - p.t0) / p.hop));
+    const v = [];
+    for (let i = a; i <= b; i++) v.push(20 * Math.log10(p.rms[i] + 1e-6));
+    const m = v.reduce((s, x) => s + x, 0) / Math.max(1, v.length);
+    const sd = Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, v.length)) || 1;
+    return { a, v: v.map((x) => (x - m) / sd) };
+  };
+  const R = seg(refP, refSpan), S = seg(stuP, stuSpan);
+  const n = R.v.length, m = S.v.length;
+  const linear = (t) => stuSpan[0] + (t - refSpan[0]) * (stuSpan[1] - stuSpan[0]) / (refSpan[1] - refSpan[0]);
+  if (n < 5 || m < 5) return linear;
+  const band = Math.max(Math.abs(n - m) + 10, Math.round(Math.max(n, m) * 0.25));
+  const INF = 1e18;
+  const D = new Float64Array((n + 1) * (m + 1)).fill(INF);
+  const idx = (i, j) => i * (m + 1) + j;
+  D[0] = 0;
+  for (let i = 1; i <= n; i++) {
+    const jc = Math.round(i * m / n);
+    for (let j = Math.max(1, jc - band); j <= Math.min(m, jc + band); j++) {
+      const c = Math.abs(R.v[i - 1] - S.v[j - 1]);
+      D[idx(i, j)] = c + Math.min(D[idx(i - 1, j - 1)], D[idx(i - 1, j)] + 0.3, D[idx(i, j - 1)] + 0.3);
+    }
+  }
+  if (D[idx(n, m)] >= INF) return linear;
+  // backtrack
+  const pairs = [];
+  let i = n, j = m;
+  while (i > 0 && j > 0) {
+    pairs.push([i - 1, j - 1]);
+    const d = D[idx(i - 1, j - 1)], u = D[idx(i - 1, j)] + 0.3, l = D[idx(i, j - 1)] + 0.3;
+    if (d <= u && d <= l) { i--; j--; } else if (u < l) i--; else j--;
+  }
+  pairs.reverse();
+  // average student frame for each reference frame, then smooth
+  const sum = new Float64Array(n), cnt = new Float64Array(n);
+  pairs.forEach(([a, b]) => { sum[a] += b; cnt[a]++; });
+  const mapF = Array.from(sum, (s, k) => cnt[k] ? s / cnt[k] : NaN);
+  for (let k = 0; k < n; k++) if (Number.isNaN(mapF[k])) mapF[k] = k ? mapF[k - 1] : 0;
+  const sm = mapF.map((_, k) => {
+    let s = 0, c = 0;
+    for (let q = Math.max(0, k - 5); q <= Math.min(n - 1, k + 5); q++) { s += mapF[q]; c++; }
+    return s / c;
+  });
+  for (let k = 1; k < n; k++) if (sm[k] < sm[k - 1]) sm[k] = sm[k - 1];
+  return function map(t) {
+    const f = (t - refP.t0) / refP.hop - R.a;
+    if (f <= 0 || f >= n - 1) return linear(t);
+    const k = Math.floor(f), fr = f - k;
+    const sf = sm[k] * (1 - fr) + sm[k + 1] * fr;
+    return stuP.t0 + (S.a + sf) * stuP.hop;
+  };
+}

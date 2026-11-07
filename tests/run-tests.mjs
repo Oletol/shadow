@@ -3,6 +3,7 @@ import { yinTrack, analysePitch, voicedMedian } from '../js/pitch.js';
 import { phraseToLabels, ctcForcedAlign, greedyDecode, logSoftmax, normaliseText, alignWordLists, W2V_VOCAB } from '../js/align.js';
 import { buildAnalysis, speechSpan, SR } from '../js/analysis.js';
 import { compareAll, buildFeedback, classifyTone } from '../js/scoring.js';
+import { comparePhonemes } from '../js/phonemes.js';
 
 let failed = 0;
 function check(name, cond, info = '') {
@@ -139,6 +140,51 @@ const refNo = buildAnalysis(phrase(modelMelody, W, 1.6), text, null);
 const stuNo = buildAnalysis(phrase(modelMelody, W, 1.6, 1.1, 4), text, null);
 const resNo = compareAll(refNo, stuNo, { target: text });
 check('fallback without models still scores intonation', resNo.intonation.ok && resNo.intonation.score > 70, String(resNo.intonation.score));
+
+// 6. Melody-only mode (humming): no words needed, envelope DTW alignment
+{
+  const hum = buildAnalysis(phrase(modelMelody, W, 1.6, 1.2, -5), text, null);
+  const resHum = compareAll(ref, hum, { target: text, mode: 'melody' });
+  check('melody mode: same tune scores high', resHum.intonation.score >= 85, String(resHum.intonation.score));
+  check('melody mode: no pronunciation score', resHum.pronunciation.score == null);
+  const humBad = buildAnalysis(phrase(risingMelody, W, 1.6, 1.0, 0), text, null);
+  const resHumBad = compareAll(ref, humBad, { target: text, mode: 'melody' });
+  check('melody mode: wrong tune scores low', resHumBad.intonation.score <= 55, String(resHumBad.intonation.score));
+  const slow = buildAnalysis(phrase(modelMelody, W, 1.6, 1.33, 0), text, ctcFor(W, 1.33, 1.6));
+  const resSlow = compareAll(ref, slow, { target: text, expectedTempo: 1 / 0.75 });
+  check('slow shadowing: tempo judged against 0.75 speed', Math.abs(resSlow.rhythm.tempo - 1) < 0.1, resSlow.rhythm.tempo.toFixed(2));
+}
+
+// 7. Phoneme comparison (IPA)
+{
+  const syms = ['<pad>', '<s>', '</s>', '<unk>', 'w', 'ɛ', 'ə', 'ɹ', 'ð', 'z', 'æ', 't', 'ɒ', 'ɑː', 'ɾ', 'iː'];
+  const V = syms.length;
+  const id = Object.fromEntries(syms.map((s, i) => [s, i]));
+  const id2sym = Object.fromEntries(syms.map((s, i) => [i, s]));
+  function phonLogits(seq, T) {
+    const flat = new Float32Array(T * V).fill(-6);
+    for (let t = 0; t < T; t++) flat[t * V] = 6;
+    seq.forEach(([sym, f]) => { flat[f * V + id[sym]] = 9; flat[f * V] = -6; });
+    return { logp: logSoftmax(flat, T, V), T, V, frameSec: 0.02 };
+  }
+  // speaker: "that wear" RP  /ð æ t/  /w ɛ ə/
+  const refPh = phonLogits([['ð', 5], ['æ', 9], ['t', 13], ['w', 30], ['ɛ', 34], ['ə', 38]], 50);
+  // student: /z æ ɾ/ /w ɛ ɹ/  (th -> z, flapped t, rhotic r)
+  const stuPh = phonLogits([['z', 5], ['æ', 9], ['ɾ', 13], ['w', 30], ['ɛ', 34], ['ɹ', 38]], 50);
+  const refWords = [{ word: 'that', start: 0.08, end: 0.3 }, { word: 'wear', start: 0.58, end: 0.8 }];
+  const res = comparePhonemes(refPh, stuPh, id2sym, refWords);
+  const kinds = res.words.flatMap((w) => w.issues.map((i) => i.kind));
+  check('IPA: speaker phones per word', res.words[0].ref.join('') === 'ðæt' && res.words[1].ref.join('') === 'wɛə', res.words.map((w) => w.ref.join('') + '/' + w.stu.join('')).join(' '));
+  check('IPA: th substitution found', kinds.includes('th'));
+  check('IPA: flapped t found', kinds.includes('flap'));
+  check('IPA: rhotic r found', kinds.includes('rhotic'), kinds.join(','));
+  const same = comparePhonemes(refPh, refPh, id2sym, refWords);
+  check('IPA: identical speech scores 100', same.score === 100 && same.words.every((w) => !w.issues.length), String(same.score));
+  // extra vowel after a final consonant
+  const epi = phonLogits([['ð', 5], ['æ', 9], ['t', 13], ['ə', 17], ['w', 30], ['ɛ', 34], ['ə', 38]], 50);
+  const resE = comparePhonemes(refPh, epi, id2sym, refWords);
+  check('IPA: epenthetic vowel found', resE.words[0].issues.some((i) => i.kind === 'epenthesis'), JSON.stringify(resE.words[0].items.map((i) => i.type)));
+}
 
 console.log(failed ? `\n${failed} test(s) failed` : '\nAll tests passed');
 process.exit(failed ? 1 : 0);
