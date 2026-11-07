@@ -39,7 +39,8 @@ jobs:
           else
             echo "The list of phrases is up to date."
           fi
-
+      - name: Build the SCORM packages for Moodle (downloads/scorm/)
+        run: python tools/build_scorm.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
