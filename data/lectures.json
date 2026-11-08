@@ -1,6 +1,92 @@
 {
   "lectures": [
     {
+      "id": "Sports Report",
+      "title": "Sports Report",
+      "phrases": [
+        {
+          "text": "This morning the Roarers football team arrived back from York",
+          "audio": "assets/Sports%20Report/01%20This%20morning%20the%20Roarers%20football%20team%20arrived%20back%20from%20York.mp3"
+        },
+        {
+          "text": "Laura Short is our sports reporter and she was at the airport",
+          "audio": "assets/Sports%20Report/02%20Laura%20Short%20is%20our%20sports%20reporter%20and%20she%20was%20at%20the%20airport.mp3"
+        },
+        {
+          "text": "Good morning, listeners. This is Laura Short",
+          "audio": "assets/Sports%20Report/03%20Good%20morning%2C%20listeners.%20This%20is%20Laura%20Short.mp3"
+        },
+        {
+          "text": "Good morning, listeners. This is Laura Short",
+          "audio": "assets/Sports%20Report/04%20Good%20morning%2C%20listeners.%20This%20is%20Laura%20Short.mp3"
+        },
+        {
+          "text": "Here's George Ball, the goalkeeper",
+          "audio": "assets/Sports%20Report/05%20Here%27s%20George%20Ball%2C%20the%20goalkeeper.mp3"
+        },
+        {
+          "text": "Good morning, George",
+          "audio": "assets/Sports%20Report/06%20Good%20morning%2C%20George.mp3"
+        },
+        {
+          "text": "Good morning",
+          "audio": "assets/Sports%20Report/07%20Good%20morning.mp3"
+        },
+        {
+          "text": "Are you a reporter",
+          "audio": "assets/Sports%20Report/08%20Are%20you%20a%20reporter.mp3"
+        },
+        {
+          "text": "Yes, George",
+          "audio": "assets/Sports%20Report/09%20Yes%2C%20George.mp3"
+        },
+        {
+          "text": "I'm Laura Short from Radio Station 4",
+          "audio": "assets/Sports%20Report/10%20I%27m%20Laura%20Short%20from%20Radio%20Station%204.mp3"
+        },
+        {
+          "text": "Tell us about the football match with York",
+          "audio": "assets/Sports%20Report/11%20Tell%20us%20about%20the%20football%20match%20with%20York.mp3"
+        },
+        {
+          "text": "Well, it was awful",
+          "audio": "assets/Sports%20Report/12%20Well%2C%20it%20was%20awful.mp3"
+        },
+        {
+          "text": "We lost",
+          "audio": "assets/Sports%20Report/13%20We%20lost.mp3"
+        },
+        {
+          "text": "and the score was forty-four, four",
+          "audio": "assets/Sports%20Report/14%20and%20the%20score%20was%20forty-four%2C%20four.mp3"
+        },
+        {
+          "text": "But it wasn't my fault, Laura",
+          "audio": "assets/Sports%20Report/15%20But%20it%20wasn%27t%20my%20fault%2C%20Laura.mp3"
+        },
+        {
+          "text": "Whose fault was it George",
+          "audio": "assets/Sports%20Report/16%20Whose%20fault%20was%20it%20George.mp3"
+        },
+        {
+          "text": "The forwards",
+          "audio": "assets/Sports%20Report/17%20The%20forwards.mp3"
+        },
+        {
+          "text": "The forwards",
+          "audio": "assets/Sports%20Report/18%20The%20forwards.mp3"
+        },
+        {
+          "text": "Yes, the forwards",
+          "audio": "assets/Sports%20Report/19%20Yes%2C%20the%20forwards.mp3"
+        },
+        {
+          "text": "They're always falling over or losing the ball",
+          "audio": "assets/Sports%20Report/20%20They%27re%20always%20falling%20over%20or%20losing%20the%20ball.mp3"
+        }
+      ]
+    },
+    {
       "id": "ben-crystal-original-pronunciation",
       "title": "Ben Crystal on Original Pronunciation",
       "phrases": [
