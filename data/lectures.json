@@ -1,6 +1,64 @@
 {
   "lectures": [
     {
+      "id": "An Interesting Film",
+      "title": "An Interesting Film",
+      "phrases": [
+        {
+          "text": "Is Tim in",
+          "audio": "assets/An%20Interesting%20Film/1%20Is%20Tim%20in.mp3"
+        },
+        {
+          "text": "Is he coming to the pictures",
+          "audio": "assets/An%20Interesting%20Film/2%20Is%20he%20coming%20to%20the%20pictures.mp3"
+        },
+        {
+          "text": "Tim s ill",
+          "audio": "assets/An%20Interesting%20Film/3%20Tim_s%20ill.mp3"
+        },
+        {
+          "text": "Here he is",
+          "audio": "assets/An%20Interesting%20Film/4%20Here%20he%20is.mp3"
+        },
+        {
+          "text": "Hello, Tim",
+          "audio": "assets/An%20Interesting%20Film/5%20Hello%2C%20Tim.mp3"
+        },
+        {
+          "text": "Hello, Bill",
+          "audio": "assets/An%20Interesting%20Film/6%20Hello%2C%20Bill.mp3"
+        },
+        {
+          "text": "Are you ill, Tim",
+          "audio": "assets/An%20Interesting%20Film/7%20Are%20you%20ill%2C%20Tim.mp3"
+        },
+        {
+          "text": "Is it an interesting film",
+          "audio": "assets/An%20Interesting%20Film/8%20Is%20it%20an%20interesting%20film.mp3"
+        },
+        {
+          "text": "It s big Jim and the Indians",
+          "audio": "assets/An%20Interesting%20Film/9%20It_s%20big%20Jim%20and%20the%20Indians.mp3"
+        },
+        {
+          "text": "And it begins in six minutes",
+          "audio": "assets/An%20Interesting%20Film/10%20And%20it%20begins%20in%20six%20minutes.mp3"
+        },
+        {
+          "text": "If you re ill, Tim",
+          "audio": "assets/An%20Interesting%20Film/11%20If%20you_re%20ill%2C%20Tim.mp3"
+        },
+        {
+          "text": "Quick",
+          "audio": "assets/An%20Interesting%20Film/12%20Quick.mp3"
+        },
+        {
+          "text": "Or we ll miss the beginning of the film",
+          "audio": "assets/An%20Interesting%20Film/13%20Or%20we_ll%20miss%20the%20beginning%20of%20the%20film.mp3"
+        }
+      ]
+    },
+    {
       "id": "Sports Report",
       "title": "Sports Report",
       "phrases": [
