@@ -56,6 +56,12 @@
           "text": "Or we ll miss the beginning of the film",
           "audio": "assets/An%20Interesting%20Film/13%20Or%20we_ll%20miss%20the%20beginning%20of%20the%20film.mp3"
         }
+      ],
+      "full": [
+        {
+          "title": "An Interesting Film",
+          "audio": "assets/An%20Interesting%20Film/full/An%20Interesting%20Film.mp3"
+        }
       ]
     },
     {
@@ -142,6 +148,12 @@
           "text": "They're always falling over or losing the ball",
           "audio": "assets/Sports%20Report/20%20They%27re%20always%20falling%20over%20or%20losing%20the%20ball.mp3"
         }
+      ],
+      "full": [
+        {
+          "title": "Sports Report",
+          "audio": "assets/Sports%20Report/full/Sports%20Report.mp3"
+        }
       ]
     },
     {
@@ -203,6 +215,12 @@
         {
           "text": "He is the worst nurse in the world",
           "audio": "assets/The%20Worst%20Nurse/14%20He%20is%20the%20worst%20nurse%20in%20the%20world.mp3"
+        }
+      ],
+      "full": [
+        {
+          "title": "The worst nurse",
+          "audio": "assets/The%20Worst%20Nurse/full/The%20worst%20nurse.mp3"
         }
       ]
     },
