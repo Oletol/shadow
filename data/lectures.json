@@ -145,6 +145,68 @@
       ]
     },
     {
+      "id": "The Worst Nurse",
+      "title": "The Worst Nurse",
+      "phrases": [
+        {
+          "text": "Nurse",
+          "audio": "assets/The%20Worst%20Nurse/1%20Nurse.mp3"
+        },
+        {
+          "text": "Nurse",
+          "audio": "assets/The%20Worst%20Nurse/2%20Nurse.mp3"
+        },
+        {
+          "text": "I m thirsty",
+          "audio": "assets/The%20Worst%20Nurse/3%20I_m%20thirsty.mp3"
+        },
+        {
+          "text": "Nurse",
+          "audio": "assets/The%20Worst%20Nurse/4%20Nurse.mp3"
+        },
+        {
+          "text": "My head hurts",
+          "audio": "assets/The%20Worst%20Nurse/5%20My%20head%20hurts.mp3"
+        },
+        {
+          "text": "Nurse Sherman always wears such dirty shirts",
+          "audio": "assets/The%20Worst%20Nurse/6%20Nurse%20Sherman%20always%20wears%20such%20dirty%20shirts.mp3"
+        },
+        {
+          "text": "He never arrives at work early",
+          "audio": "assets/The%20Worst%20Nurse/7%20He%20never%20arrives%20at%20work%20early.mp3"
+        },
+        {
+          "text": "He and nurse Turner",
+          "audio": "assets/The%20Worst%20Nurse/8%20He%20and%20nurse%20Turner.mp3"
+        },
+        {
+          "text": "Weren t at work on Thursday, were they",
+          "audio": "assets/The%20Worst%20Nurse/9%20Weren_t%20at%20work%20on%20Thursday%2C%20were%20they.mp3"
+        },
+        {
+          "text": "No, they weren t",
+          "audio": "assets/The%20Worst%20Nurse/10%20No%2C%20they%20weren_t.mp3"
+        },
+        {
+          "text": "Nurse Sherman is the worst nurse in the ward",
+          "audio": "assets/The%20Worst%20Nurse/11%20Nurse%20Sherman%20is%20the%20worst%20nurse%20in%20the%20ward.mp3"
+        },
+        {
+          "text": "Isn t he, sir Herbert",
+          "audio": "assets/The%20Worst%20Nurse/12%20Isn_t%20he%2C%20sir%20Herbert.mp3"
+        },
+        {
+          "text": "No, he isn t, Colonel Burton",
+          "audio": "assets/The%20Worst%20Nurse/13%20No%2C%20he%20isn_t%2C%20Colonel%20Burton.mp3"
+        },
+        {
+          "text": "He is the worst nurse in the world",
+          "audio": "assets/The%20Worst%20Nurse/14%20He%20is%20the%20worst%20nurse%20in%20the%20world.mp3"
+        }
+      ]
+    },
+    {
       "id": "ben-crystal-original-pronunciation",
       "title": "Ben Crystal on Original Pronunciation",
       "phrases": [
