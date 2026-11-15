@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -27,18 +27,9 @@ jobs:
       - name: Build the list of lectures and phrases from assets/
         run: python tools/build_index.py
 
-      - name: Save the list in the repository
-        run: |
-          if [ -n "$(git status --porcelain data/lectures.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add data/lectures.json
-            git commit -m "Update the list of phrases"
-            git pull --rebase
-            git push
-          else
-            echo "The list of phrases is up to date."
-          fi
+      # The list is built here for the published site only. It is not saved back to
+      # the repository: a commit made by this job after every push made the next
+      # push from the author's computer fail.
       - name: Build the SCORM packages for Moodle (downloads/scorm/)
         run: python tools/build_scorm.py
       
