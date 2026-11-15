@@ -196,12 +196,21 @@ export function analysePitch(samples, sr) {
   const median = voicedMedian(f0);
   const st = toSemitones(f0, median);
   const stBridged = bridgeGaps(st, 15);
+  // Frames the tracker is not sure about: weak periodicity (creaky or breathy voice)
+  // or a value that had to be moved by the octave correction. They are still drawn,
+  // but the melody comparison does not score them.
+  const reliable = new Uint8Array(f0.length);
+  for (let i = 0; i < f0.length; i++) {
+    if (!(f0[i] > 0) || !(tr.f0[i] > 0)) continue;
+    const moved = Math.abs(12 * Math.log2(f0[i] / tr.f0[i])) > 1.5;
+    reliable[i] = !moved && tr.conf[i] >= 0.8 ? 1 : 0;
+  }
   let voiced = 0;
   for (let i = 0; i < f0.length; i++) if (f0[i] > 0) voiced++;
   // frame times are window centres
   const t0 = (Math.round(sr * 0.032) / 2) / sr;
   return {
-    f0, st, stBridged, rms: tr.rms, hop: tr.hop, t0, median,
+    f0, st, stBridged, reliable, rms: tr.rms, hop: tr.hop, t0, median,
     voicedRatio: f0.length ? voiced / f0.length : 0
   };
 }

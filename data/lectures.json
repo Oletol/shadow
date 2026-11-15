@@ -1,64 +1,6 @@
 {
   "lectures": [
     {
-      "id": "An Interesting Film",
-      "title": "An Interesting Film",
-      "phrases": [
-        {
-          "text": "Is Tim in",
-          "audio": "assets/An%20Interesting%20Film/1%20Is%20Tim%20in.mp3"
-        },
-        {
-          "text": "Is he coming to the pictures",
-          "audio": "assets/An%20Interesting%20Film/2%20Is%20he%20coming%20to%20the%20pictures.mp3"
-        },
-        {
-          "text": "Tim s ill",
-          "audio": "assets/An%20Interesting%20Film/3%20Tim_s%20ill.mp3"
-        },
-        {
-          "text": "Here he is",
-          "audio": "assets/An%20Interesting%20Film/4%20Here%20he%20is.mp3"
-        },
-        {
-          "text": "Hello, Tim",
-          "audio": "assets/An%20Interesting%20Film/5%20Hello%2C%20Tim.mp3"
-        },
-        {
-          "text": "Hello, Bill",
-          "audio": "assets/An%20Interesting%20Film/6%20Hello%2C%20Bill.mp3"
-        },
-        {
-          "text": "Are you ill, Tim",
-          "audio": "assets/An%20Interesting%20Film/7%20Are%20you%20ill%2C%20Tim.mp3"
-        },
-        {
-          "text": "Is it an interesting film",
-          "audio": "assets/An%20Interesting%20Film/8%20Is%20it%20an%20interesting%20film.mp3"
-        },
-        {
-          "text": "It s big Jim and the Indians",
-          "audio": "assets/An%20Interesting%20Film/9%20It_s%20big%20Jim%20and%20the%20Indians.mp3"
-        },
-        {
-          "text": "And it begins in six minutes",
-          "audio": "assets/An%20Interesting%20Film/10%20And%20it%20begins%20in%20six%20minutes.mp3"
-        },
-        {
-          "text": "If you re ill, Tim",
-          "audio": "assets/An%20Interesting%20Film/11%20If%20you_re%20ill%2C%20Tim.mp3"
-        },
-        {
-          "text": "Quick",
-          "audio": "assets/An%20Interesting%20Film/12%20Quick.mp3"
-        },
-        {
-          "text": "Or we ll miss the beginning of the film",
-          "audio": "assets/An%20Interesting%20Film/13%20Or%20we_ll%20miss%20the%20beginning%20of%20the%20film.mp3"
-        }
-      ]
-    },
-    {
       "id": "Sports Report",
       "title": "Sports Report",
       "phrases": [
@@ -142,69 +84,8 @@
           "text": "They're always falling over or losing the ball",
           "audio": "assets/Sports%20Report/20%20They%27re%20always%20falling%20over%20or%20losing%20the%20ball.mp3"
         }
-      ]
-    },
-    {
-      "id": "The Worst Nurse",
-      "title": "The Worst Nurse",
-      "phrases": [
-        {
-          "text": "Nurse",
-          "audio": "assets/The%20Worst%20Nurse/1%20Nurse.mp3"
-        },
-        {
-          "text": "Nurse",
-          "audio": "assets/The%20Worst%20Nurse/2%20Nurse.mp3"
-        },
-        {
-          "text": "I m thirsty",
-          "audio": "assets/The%20Worst%20Nurse/3%20I_m%20thirsty.mp3"
-        },
-        {
-          "text": "Nurse",
-          "audio": "assets/The%20Worst%20Nurse/4%20Nurse.mp3"
-        },
-        {
-          "text": "My head hurts",
-          "audio": "assets/The%20Worst%20Nurse/5%20My%20head%20hurts.mp3"
-        },
-        {
-          "text": "Nurse Sherman always wears such dirty shirts",
-          "audio": "assets/The%20Worst%20Nurse/6%20Nurse%20Sherman%20always%20wears%20such%20dirty%20shirts.mp3"
-        },
-        {
-          "text": "He never arrives at work early",
-          "audio": "assets/The%20Worst%20Nurse/7%20He%20never%20arrives%20at%20work%20early.mp3"
-        },
-        {
-          "text": "He and nurse Turner",
-          "audio": "assets/The%20Worst%20Nurse/8%20He%20and%20nurse%20Turner.mp3"
-        },
-        {
-          "text": "Weren t at work on Thursday, were they",
-          "audio": "assets/The%20Worst%20Nurse/9%20Weren_t%20at%20work%20on%20Thursday%2C%20were%20they.mp3"
-        },
-        {
-          "text": "No, they weren t",
-          "audio": "assets/The%20Worst%20Nurse/10%20No%2C%20they%20weren_t.mp3"
-        },
-        {
-          "text": "Nurse Sherman is the worst nurse in the ward",
-          "audio": "assets/The%20Worst%20Nurse/11%20Nurse%20Sherman%20is%20the%20worst%20nurse%20in%20the%20ward.mp3"
-        },
-        {
-          "text": "Isn t he, sir Herbert",
-          "audio": "assets/The%20Worst%20Nurse/12%20Isn_t%20he%2C%20sir%20Herbert.mp3"
-        },
-        {
-          "text": "No, he isn t, Colonel Burton",
-          "audio": "assets/The%20Worst%20Nurse/13%20No%2C%20he%20isn_t%2C%20Colonel%20Burton.mp3"
-        },
-        {
-          "text": "He is the worst nurse in the world",
-          "audio": "assets/The%20Worst%20Nurse/14%20He%20is%20the%20worst%20nurse%20in%20the%20world.mp3"
-        }
-      ]
+      ],
+      "accent": "non-rhotic"
     },
     {
       "id": "ben-crystal-original-pronunciation",
@@ -283,6 +164,7 @@
           "audio": "assets/ben-crystal-original-pronunciation/There%27s%20nothing%20quite%20like.mp3"
         }
       ],
+      "accent": "non-rhotic",
       "full": [
         {
           "title": "Ben Crystal - Original Pronunciation",

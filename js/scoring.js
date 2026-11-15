@@ -5,6 +5,11 @@
 import { sampleTrack } from './pitch.js';
 import { buildTimeMap, alignWordLists, splitWords, envelopeTimeMap } from './align.js';
 
+// Version of the scoring method. It is saved with every attempt, so that results
+// collected under different versions are never mixed in an analysis.
+// Change it whenever a formula, a weight or a threshold changes.
+export const SCORING_VERSION = '2026.11.15';
+
 export const STRICTNESS = {
   lenient:  { sigma: 4.5, label: 'Lenient' },
   standard: { sigma: 3.2, label: 'Standard' },
@@ -100,54 +105,176 @@ function dbTrack(rms) {
   return out;
 }
 
+/**
+ * Syllable nuclei of a recording, found from the loudness curve of the voiced
+ * stretches: every loudness peak that is separated from its neighbour by a dip of
+ * at least 3 dB (or by a voiceless stretch) is one syllable. No speech model is
+ * needed, so this also works for humming and before the models are loaded.
+ * Returns [{start, end, peak, peakDb, dur}] in seconds.
+ */
+export function findSyllables(p, span) {
+  const n = p.st.length;
+  const i0 = Math.max(0, Math.floor((span[0] - p.t0) / p.hop));
+  const i1 = Math.min(n - 1, Math.ceil((span[1] - p.t0) / p.hop));
+  if (i1 - i0 < 4) return [];
+  const db = smooth(Array.from(dbTrack(p.rms)), 2);
+  // voiced frames, with gaps of up to 3 frames closed
+  const voiced = new Uint8Array(n);
+  for (let i = i0; i <= i1; i++) voiced[i] = Number.isFinite(p.st[i]) ? 1 : 0;
+  for (let i = i0; i <= i1; i++) {
+    if (voiced[i]) continue;
+    let j = i;
+    while (j <= i1 && !voiced[j]) j++;
+    if (i > i0 && j <= i1 && j - i <= 3) for (let k = i; k < j; k++) voiced[k] = 1;
+    i = j;
+  }
+  const out = [];
+  let top = -Infinity;
+  for (let i = i0; i <= i1; i++) if (voiced[i]) top = Math.max(top, db[i]);
+  const push = (a, b) => {
+    if (b - a + 1 < 4) return;
+    let pk = a;
+    for (let i = a; i <= b; i++) if (db[i] > db[pk]) pk = i;
+    if (db[pk] < top - 25) return;
+    out.push({ start: p.t0 + a * p.hop, end: p.t0 + b * p.hop, peak: p.t0 + pk * p.hop, peakDb: db[pk], dur: (b - a + 1) * p.hop });
+  };
+  let i = i0;
+  while (i <= i1) {
+    if (!voiced[i]) { i++; continue; }
+    let j = i;
+    while (j + 1 <= i1 && voiced[j + 1]) j++;
+    // split the voiced stretch i..j at loudness dips
+    let segStart = i, peak = i, valley = -1;
+    for (let k = i + 1; k <= j; k++) {
+      if (valley < 0) {
+        if (db[k] > db[peak]) peak = k;
+        else if (db[peak] - db[k] >= 3) valley = k;
+      } else {
+        if (db[k] < db[valley]) valley = k;
+        else if (db[k] - db[valley] >= 3 && k - peak >= 8) {
+          push(segStart, valley - 1);
+          segStart = valley; peak = k; valley = -1;
+        }
+      }
+    }
+    push(segStart, j);
+    i = j + 1;
+  }
+  return out;
+}
+
+/** z-scores of a list (0 when all values are equal). */
+function zscores(arr) {
+  const m = mean(arr), sd = Math.sqrt(mean(arr.map((v) => (v - m) ** 2)));
+  return arr.map((v) => sd > 1e-9 ? (v - m) / sd : 0);
+}
+
+/**
+ * The nucleus is the last prominent syllable of the phrase. Prominence combines
+ * loudness, length and the size of the pitch movement on the syllable.
+ * Returns the index in `syl`, or -1.
+ */
+function findNucleus(syl) {
+  const ok = syl.filter((s) => s.n >= 3);
+  if (!ok.length) return -1;
+  const zl = zscores(ok.map((s) => s.db)), zd = zscores(ok.map((s) => s.dur)), zp = zscores(ok.map((s) => s.pitchSpan));
+  ok.forEach((s, k) => { s.prominence = 0.5 * zl[k] + 0.5 * zd[k] + zp[k]; });
+  for (let k = ok.length - 1; k >= 0; k--) if (ok[k].prominence >= 0) return syl.indexOf(ok[k]);
+  return syl.indexOf(ok[ok.length - 1]);
+}
+
 /** Intonation comparison. ref/stu: {pitch, span, words|null}. */
+/** How far (seconds) a pitch movement may be early or late without being counted as an error. */
+export const TIME_TOLERANCE_S = 0.07;
+
 export function compareIntonation(ref, stu, map, strictness = 'standard') {
-  const sigma = (STRICTNESS[strictness] || STRICTNESS.standard).sigma;
+  const sigma0 = (STRICTNESS[strictness] || STRICTNESS.standard).sigma;
   const rp = ref.pitch, sp = stu.pitch;
   const tR = frameTimes(rp);
   const iFrom = Math.max(0, Math.floor((ref.span[0] - rp.t0) / rp.hop));
   const iTo = Math.min(rp.st.length - 1, Math.ceil((ref.span[1] - rp.t0) / rp.hop));
 
-  const refVals = [], stuValsRaw = [], times = [];
-  let refVoiced = 0;
+  // refVals / stuValsRaw are what the chart draws; refScored leaves out the frames
+  // where the speaker's pitch is not reliable (creaky voice, octave corrections).
+  const refVals = [], refScored = [], stuValsRaw = [], times = [];
+  let refVoiced = 0, refUnreliable = 0;
+  const sampleStu = (t) => sampleTrack(sp.stBridged, sp.hop, sp.t0, map(t));
   for (let i = iFrom; i <= iTo; i++) {
     const t = tR(i);
     const r = rp.st[i];
-    const s = sampleTrack(sp.stBridged, sp.hop, sp.t0, map(t));
+    const trusted = !rp.reliable || rp.reliable[i] === 1;
     times.push(t);
     refVals.push(r);
-    stuValsRaw.push(s);
-    if (Number.isFinite(r)) refVoiced++;
+    refScored.push(trusted ? r : NaN);
+    stuValsRaw.push(sampleStu(t));
+    if (Number.isFinite(r)) { refVoiced++; if (!trusted) refUnreliable++; }
   }
-  const pairsR = [], pairsS = [];
-  refVals.forEach((r, k) => {
-    if (Number.isFinite(r) && Number.isFinite(stuValsRaw[k])) { pairsR.push(r); pairsS.push(stuValsRaw[k]); }
+  const firstR = [], firstS = [];
+  refScored.forEach((r, k) => {
+    if (Number.isFinite(r) && Number.isFinite(stuValsRaw[k])) { firstR.push(r); firstS.push(stuValsRaw[k]); }
   });
-  const coverage = refVoiced ? pairsR.length / refVoiced : 0;
-  if (pairsR.length < 8) {
+  const scoredVoiced = refVoiced - refUnreliable;
+  const coverage = scoredVoiced ? firstR.length / scoredVoiced : 0;
+  if (firstR.length < 8) {
     return { ok: false, score: null, coverage, times, refVals, stuVals: stuValsRaw.map(() => NaN),
       reason: 'Too little voiced speech could be matched between the two recordings.' };
   }
-  const offset = mean(pairsS.map((s, k) => s - pairsR[k]));
+  const offset = mean(firstS.map((s, k) => s - firstR[k]));
   const stuVals = stuValsRaw.map((s) => Number.isFinite(s) ? s - offset : NaN);
-  const diffs = pairsS.map((s, k) => s - offset - pairsR[k]);
+
+  // Timing tolerance: a movement made slightly early or late is the same melody.
+  // Each speaker frame is compared with the closest student value within +-70 ms.
+  const shifts = [];
+  for (let d = -TIME_TOLERANCE_S; d <= TIME_TOLERANCE_S + 1e-9; d += 0.01) shifts.push(d);
+  const stuNear = refScored.map((r, k) => {
+    if (!Number.isFinite(r)) return NaN;
+    let best = NaN, bd = Infinity;
+    for (const d of shifts) {
+      const v = d === 0 ? stuValsRaw[k] : sampleStu(times[k] + d);
+      if (!Number.isFinite(v)) continue;
+      const diff = Math.abs(v - offset - r);
+      if (diff < bd) { bd = diff; best = v - offset; }
+    }
+    return best;
+  });
+  const pairsR = [], pairsS = [];
+  refScored.forEach((r, k) => {
+    if (Number.isFinite(r) && Number.isFinite(stuNear[k])) { pairsR.push(r); pairsS.push(stuNear[k]); }
+  });
+  const diffs = pairsS.map((s, k) => s - pairsR[k]);
   const rmse = Math.sqrt(mean(diffs.map((d) => d * d)));
+  const rmseExact = Math.sqrt(mean(firstS.map((s, k) => (s - offset - firstR[k]) ** 2)));
   const r = pearson(pairsR, pairsS);
 
-  const rangeRef = percentile(refVals, 0.9) - percentile(refVals, 0.1);
-  const rangeStu = percentile(stuVals, 0.9) - percentile(stuVals, 0.1);
+  // The student is measured on the same frames as the speaker, so that a recording
+  // compared with itself gives identical numbers on both sides.
+  const stuScored = stuVals.map((v, k) => Number.isFinite(refScored[k]) ? v : NaN);
+  const rangeRef = percentile(pairsR, 0.9) - percentile(pairsR, 0.1);
+  const rangeStu = percentile(pairsS, 0.9) - percentile(pairsS, 0.1);
   const rangeRatio = rangeRef > 0 && rangeStu > 0 ? Math.min(rangeRef, rangeStu) / Math.max(rangeRef, rangeStu) : 0;
+  // A speaker with a wide pitch range is harder to follow to the semitone:
+  // the tolerance grows with the range (x1 at 7 semitones, at most x1.6).
+  // On a phrase with little pitch movement the tolerance shrinks (down to x0.5),
+  // otherwise any melody, even the opposite one, would fit inside it.
+  const rangeFactor = clamp(rangeRef / 7, 0.5, 1.6);
+  const sigma = sigma0 * rangeFactor;
 
   // per word
   const words = [];
   if (ref.words) {
     ref.words.forEach((w, wi) => {
-      const rv = [], sv = [];
+      const rv = [], sv = [], svTrusted = [];
+      const rs = [], sn = [];
       times.forEach((t, k) => {
-        if (t >= w.start && t <= w.end) { rv.push(refVals[k]); sv.push(stuVals[k]); }
+        if (t >= w.start && t <= w.end) {
+          rv.push(refVals[k]); sv.push(stuVals[k]); rs.push(refScored[k]); sn.push(stuNear[k]);
+          // a jump of the pitch tracker in the student's recording must not pass for the highest point
+          const j = Math.round((map(t) - sp.t0) / sp.hop);
+          svTrusted.push(!sp.reliable || sp.reliable[j] === 1 ? stuVals[k] : NaN);
+        }
       });
-      const mr = movementClass(rv), ms = movementClass(sv);
-      const both = rv.map((x, k) => [x, sv[k]]).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+      const mr = movementClass(rs), ms = movementClass(sv);
+      const both = rs.map((x, k) => [x, sn[k]]).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
       const wRmse = both.length >= 3 ? Math.sqrt(mean(both.map(([x, y]) => (x - y) ** 2))) : NaN;
       const lvlR = mean(rv.filter(Number.isFinite)), lvlS = mean(sv.filter(Number.isFinite));
       words.push({
@@ -156,25 +283,82 @@ export function compareIntonation(ref, stu, map, strictness = 'standard') {
         levelDiff: Number.isFinite(lvlR) && Number.isFinite(lvlS) ? lvlS - lvlR : NaN,
         rmse: wRmse,
         peakRef: rv.some(Number.isFinite) ? Math.max(...rv.filter(Number.isFinite)) : NaN,
-        peakStu: sv.some(Number.isFinite) ? Math.max(...sv.filter(Number.isFinite)) : NaN,
+        peakStu: svTrusted.some(Number.isFinite) ? Math.max(...svTrusted.filter(Number.isFinite)) : NaN,
         score: Number.isFinite(wRmse) ? round(100 * Math.exp(-((wRmse / sigma) ** 2))) : null
       });
     });
   }
 
-  // nucleus: from the last word that has enough voiced reference frames to the end
+  // Syllables of the speaker; the student's values are read at the same places
+  // through the time map.
+  const finite = (a) => a.filter(Number.isFinite);
+  const third = (a) => { const k = Math.max(1, Math.floor(a.length / 3)); return mean(a.slice(-k)) - mean(a.slice(0, k)); };
+  const stuDbAt = (t) => { const v = sampleTrack(sp.rms, sp.hop, sp.t0, map(t)); return Number.isFinite(v) ? 20 * Math.log10(v + 1e-6) : NaN; };
+  const syllables = findSyllables(rp, ref.span).map((sy) => {
+    const r = [], sN = [], sAll = [];
+    times.forEach((t, k) => {
+      if (t < sy.start || t > sy.end) return;
+      if (Number.isFinite(refScored[k]) && Number.isFinite(stuNear[k])) { r.push(refScored[k]); sN.push(stuNear[k]); }
+      if (Number.isFinite(stuVals[k])) sAll.push(stuVals[k]);
+    });
+    const rAll = finite(times.map((t, k) => (t >= sy.start && t <= sy.end ? refScored[k] : NaN)));
+    const word = ref.words ? ref.words.findIndex((w) => sy.peak >= w.start && sy.peak <= w.end) : -1;
+    return {
+      start: sy.start, end: sy.end, peak: sy.peak, word, n: r.length,
+      levelRef: r.length ? percentile(r, 0.5) : NaN, levelStu: sN.length ? percentile(sN, 0.5) : NaN,
+      moveRef: r.length >= 6 ? third(r) : NaN, moveStu: sN.length >= 6 ? third(sN) : NaN,
+      ref: { db: sy.peakDb, dur: sy.dur, pitchSpan: rAll.length ? Math.max(...rAll) - Math.min(...rAll) : 0, n: rAll.length },
+      stu: { db: stuDbAt(sy.peak), dur: map(sy.end) - map(sy.start), pitchSpan: sAll.length ? Math.max(...sAll) - Math.min(...sAll) : 0, n: sAll.length }
+    };
+  });
+  // Melody by syllables: level of every syllable (and its movement when the syllable
+  // is long enough) against the speaker's. Small shifts in time do not change it.
+  const sylUsed = syllables.filter((sy) => sy.n >= 3);
+  let sylRmse = NaN;
+  if (sylUsed.length >= 2) {
+    const wsum = sylUsed.reduce((a, sy) => a + sy.n, 0);
+    const off = sylUsed.reduce((a, sy) => a + sy.n * (sy.levelStu - sy.levelRef), 0) / wsum;
+    sylRmse = Math.sqrt(sylUsed.reduce((a, sy) => {
+      const d = sy.levelStu - sy.levelRef - off;
+      const m = Number.isFinite(sy.moveRef) && Number.isFinite(sy.moveStu) ? sy.moveStu - sy.moveRef : 0;
+      sy.diff = d; sy.moveDiff = m;
+      return a + sy.n * (d * d + 0.5 * m * m);
+    }, 0) / wsum);
+  }
+
+  // Nucleus: the last prominent syllable. The nuclear tone runs from the start of
+  // that syllable to the end of the phrase (nucleus and tail).
+  const refSyl = syllables.map((sy) => ({ ...sy.ref }));
+  const stuSyl = syllables.map((sy) => ({ ...sy.stu }));
+  const nucIdx = findNucleus(refSyl), nucIdxStu = findNucleus(stuSyl);
   let nucStart = ref.span[0] + (ref.span[1] - ref.span[0]) * 0.6;
-  let nucWord = null;
-  if (ref.words) {
+  let nucWord = null, nucBy = 'position';
+  const framesFrom = (t0) => times.reduce((c, t, k) => c + (t >= t0 && Number.isFinite(refScored[k]) ? 1 : 0), 0);
+  if (nucIdx >= 0 && framesFrom(syllables[nucIdx].start) >= 6) {
+    nucStart = syllables[nucIdx].start; nucBy = 'syllable';
+    if (ref.words && syllables[nucIdx].word >= 0) nucWord = ref.words[syllables[nucIdx].word].word;
+  } else if (ref.words) {
     for (let wi = ref.words.length - 1; wi >= 0; wi--) {
       const w = ref.words[wi];
-      const n = times.reduce((c, t, k) => c + (t >= w.start && t <= w.end && Number.isFinite(refVals[k]) ? 1 : 0), 0);
-      if (n >= 8) { nucStart = w.start; nucWord = w.word; break; }
+      const n = times.reduce((c, t, k) => c + (t >= w.start && t <= w.end && Number.isFinite(refScored[k]) ? 1 : 0), 0);
+      if (n >= 8) { nucStart = w.start; nucWord = w.word; nucBy = 'word'; break; }
     }
   }
+  // Both sides are classified on the same frames (those heard in both recordings).
   const nr = [], ns = [];
-  times.forEach((t, k) => { if (t >= nucStart) { nr.push(refVals[k]); ns.push(stuVals[k]); } });
+  times.forEach((t, k) => {
+    if (t >= nucStart && Number.isFinite(refScored[k]) && Number.isFinite(stuNear[k])) { nr.push(refScored[k]); ns.push(stuNear[k]); }
+  });
   const toneRef = classifyTone(nr), toneStu = classifyTone(ns);
+  // A nuclear movement that stays within one semitone of the speaker's is the same
+  // tone, even if the two labels fall on different sides of a threshold.
+  let nucRmse = NaN;
+  if (nr.length >= 6) {
+    const off = mean(ns.map((v, k) => v - nr[k]));
+    nucRmse = Math.sqrt(mean(ns.map((v, k) => (v - nr[k] - off) ** 2)));
+    if (nucRmse <= 1 && toneStu.tone !== toneRef.tone) toneStu.tone = toneRef.tone;
+  }
+  const nucWordStu = ref.words && nucIdxStu >= 0 && syllables[nucIdxStu].word >= 0 ? ref.words[syllables[nucIdxStu].word].word : null;
 
   // highest-pitched word (main accent / prominence by pitch)
   let peakWordRef = null, peakWordStu = null;
@@ -190,18 +374,27 @@ export function compareIntonation(ref, stu, map, strictness = 'standard') {
 
   const sRmse = 100 * Math.exp(-((rmse / sigma) ** 2));
   const sShape = Number.isFinite(r) ? 100 * clamp((r - 0.1) / 0.8, 0, 1) : 50;
+  // When the tone cannot be classified on either side there is nothing to compare:
+  // the tone part is then left out instead of counting as half right.
+  const toneKnown = !(toneRef.tone === 'unclear' && toneStu.tone === 'unclear');
   const sTone = toneAgreement(toneRef.tone, toneStu.tone);
   const sMove = Number.isFinite(moveAgree) ? 100 * moveAgree : sShape;
   const sRange = 100 * rangeRatio;
-  let score = 0.38 * sRmse + 0.20 * sShape + 0.22 * sTone + 0.10 * sMove + 0.10 * sRange;
+  const sSyll = Number.isFinite(sylRmse) ? 100 * Math.exp(-((sylRmse / sigma) ** 2)) : null;
+  const partsW = sSyll != null
+    ? [[sRmse, 0.20], [sSyll, 0.20], [sShape, 0.18], [sTone, toneKnown ? 0.22 : 0], [sMove, 0.10], [sRange, 0.10]]
+    : [[sRmse, 0.38], [sShape, 0.20], [sTone, toneKnown ? 0.22 : 0], [sMove, 0.10], [sRange, 0.10]];
+  let score = partsW.reduce((a, [v, w]) => a + v * w, 0) / partsW.reduce((a, [, w]) => a + w, 0);
   if (coverage < 0.35) score = Math.min(score, 60);
 
   return {
-    ok: true, score: round(score), coverage, rmse, correlation: r, offset,
+    ok: true, score: round(score), coverage, rmse, rmseExact, correlation: r, offset,
+    rangeFactor, unreliableShare: refVoiced ? refUnreliable / refVoiced : 0,
     rangeRef, rangeStu, rangeRatio,
-    toneRef, toneStu, nucWord, nucStart,
+    toneRef, toneStu, nucWord, nucStart, nucBy, nucWordStu,
+    syllables, sylRmse, nucRmse, nucleusSyllable: nucIdx, nucleusSyllableStu: nucIdxStu,
     peakWordRef, peakWordStu, moveAgree,
-    parts: { contour: round(sRmse), shape: round(sShape), tone: sTone, movement: round(sMove), range: round(sRange) },
+    parts: { contour: round(sRmse), syllables: sSyll != null ? round(sSyll) : null, shape: round(sShape), tone: toneKnown ? sTone : null, movement: round(sMove), range: round(sRange) },
     words, times, refVals, stuVals
   };
 }
@@ -398,6 +591,10 @@ export function buildFeedback(res) {
         I.nucWord);
     } else if (I.toneRef.tone !== 'unclear') {
       push('good', 'Intonation', `Your final tone matches the model (${TONE_TEXT[I.toneRef.tone]}${I.nucWord ? ` on “${I.nucWord}”` : ''}).`);
+    }
+    if (I.nucBy === 'syllable' && I.nucWord && I.nucWordStu && I.nucWord !== I.nucWordStu) {
+      push('warn', 'Intonation',
+        `The main pitch movement of the model starts on “${I.nucWord}”; yours starts on “${I.nucWordStu}”.`, I.nucWord);
     }
     if (I.peakWordRef != null && I.peakWordStu != null && I.peakWordRef !== I.peakWordStu) {
       push('warn', 'Intonation',

@@ -20,7 +20,7 @@
     </div>
     <div class="choosers">
       <div class="field" id="lecture-field" hidden>
-        <label for="lecture-select">Lecture</label>
+        <label for="lecture-select">Audio</label>
         <select id="lecture-select"></select>
       </div>
       <div class="field">
@@ -39,7 +39,7 @@
   </header>
 
   <details class="lecture" id="lecture" hidden>
-    <summary>Listen to the full lecture</summary>
+    <summary>Listen to the full recording</summary>
     <div class="full">
       <div class="field" id="part-field" hidden>
         <label for="part-select">Part</label>
@@ -183,6 +183,7 @@
       </select>
     </label>
     <p class="note">All analysis runs in your browser; recordings are not uploaded. The models download once (about 230 MB) and are then kept by the browser. Automatic scores support, but do not replace, your teacher’s judgement.</p>
+    <p class="note" id="stats-note" hidden><label><input type="checkbox" id="stats-on"> Save my scores anonymously for research on pronunciation teaching.</label> Only numbers and the sounds found are saved, with a random code instead of a name. Your voice is never saved.</p>
   </footer>
 </div>
 <script type="module" src="js/app.js"></script>

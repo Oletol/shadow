@@ -276,6 +276,10 @@ export function envelopeTimeMap(refP, stuP, refSpan, stuSpan) {
     const b = Math.min(p.rms.length - 1, Math.ceil((span[1] - p.t0) / p.hop));
     const v = [];
     for (let i = a; i <= b; i++) v.push(20 * Math.log10(p.rms[i] + 1e-6));
+    // everything quieter than 35 dB under the loudest frame counts as silence, so the
+    // noise floor of the room or of the file does not change the shape of the envelope
+    const top = v.reduce((m, x) => Math.max(m, x), -Infinity);
+    for (let k = 0; k < v.length; k++) if (v[k] < top - 35) v[k] = top - 35;
     const m = v.reduce((s, x) => s + x, 0) / Math.max(1, v.length);
     const sd = Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, v.length)) || 1;
     return { a, v: v.map((x) => (x - m) / sd) };
@@ -284,11 +288,15 @@ export function envelopeTimeMap(refP, stuP, refSpan, stuSpan) {
   const n = R.v.length, m = S.v.length;
   const linear = (t) => stuSpan[0] + (t - refSpan[0]) * (stuSpan[1] - stuSpan[0]) / (refSpan[1] - refSpan[0]);
   if (n < 5 || m < 5) return linear;
-  const band = Math.max(Math.abs(n - m) + 10, Math.round(Math.max(n, m) * 0.25));
+  // The student's speech may begin a little later or end a little earlier than the
+  // detected span (a breath, room noise): up to 0.4 s at either end can be skipped
+  // at a very small cost.
+  const FREE = Math.min(40, Math.max(0, m - 5)), SKIP = 0.02;
+  const band = Math.max(Math.abs(n - m) + 10, Math.round(Math.max(n, m) * 0.25), FREE + 5);
   const INF = 1e18;
   const D = new Float64Array((n + 1) * (m + 1)).fill(INF);
   const idx = (i, j) => i * (m + 1) + j;
-  D[0] = 0;
+  for (let j = 0; j <= FREE; j++) D[idx(0, j)] = SKIP * j;
   for (let i = 1; i <= n; i++) {
     const jc = Math.round(i * m / n);
     for (let j = Math.max(1, jc - band); j <= Math.min(m, jc + band); j++) {
@@ -296,10 +304,15 @@ export function envelopeTimeMap(refP, stuP, refSpan, stuSpan) {
       D[idx(i, j)] = c + Math.min(D[idx(i - 1, j - 1)], D[idx(i - 1, j)] + 0.3, D[idx(i, j - 1)] + 0.3);
     }
   }
-  if (D[idx(n, m)] >= INF) return linear;
+  let jEnd = m, bestEnd = INF;
+  for (let j = m; j >= Math.max(1, m - FREE); j--) {
+    const c = D[idx(n, j)] + SKIP * (m - j);
+    if (c < bestEnd) { bestEnd = c; jEnd = j; }
+  }
+  if (bestEnd >= INF) return linear;
   // backtrack
   const pairs = [];
-  let i = n, j = m;
+  let i = n, j = jEnd;
   while (i > 0 && j > 0) {
     pairs.push([i - 1, j - 1]);
     const d = D[idx(i - 1, j - 1)], u = D[idx(i - 1, j)] + 0.3, l = D[idx(i, j - 1)] + 0.3;
@@ -319,7 +332,9 @@ export function envelopeTimeMap(refP, stuP, refSpan, stuSpan) {
   for (let k = 1; k < n; k++) if (sm[k] < sm[k - 1]) sm[k] = sm[k - 1];
   return function map(t) {
     const f = (t - refP.t0) / refP.hop - R.a;
-    if (f <= 0 || f >= n - 1) return linear(t);
+    // outside the matched stretch the map continues at normal speed
+    if (f <= 0) return stuP.t0 + (S.a + sm[0]) * stuP.hop + f * refP.hop;
+    if (f >= n - 1) return stuP.t0 + (S.a + sm[n - 1]) * stuP.hop + (f - (n - 1)) * refP.hop;
     const k = Math.floor(f), fr = f - k;
     const sf = sm[k] * (1 - fr) + sm[k + 1] * fr;
     return stuP.t0 + (S.a + sf) * stuP.hop;

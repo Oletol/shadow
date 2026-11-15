@@ -3,7 +3,7 @@ import { yinTrack, analysePitch, voicedMedian } from '../js/pitch.js';
 import { phraseToLabels, ctcForcedAlign, greedyDecode, logSoftmax, normaliseText, alignWordLists, W2V_VOCAB } from '../js/align.js';
 import { buildAnalysis, speechSpan, SR } from '../js/analysis.js';
 import { compareAll, buildFeedback, classifyTone } from '../js/scoring.js';
-import { comparePhonemes } from '../js/phonemes.js';
+import { comparePhonemes, gopScores, greedyPhones, setErrorMap, applyAccent } from '../js/phonemes.js';
 
 let failed = 0;
 function check(name, cond, info = '') {
@@ -184,6 +184,92 @@ check('fallback without models still scores intonation', resNo.intonation.ok && 
   const epi = phonLogits([['ð', 5], ['æ', 9], ['t', 13], ['ə', 17], ['w', 30], ['ɛ', 34], ['ə', 38]], 50);
   const resE = comparePhonemes(refPh, epi, id2sym, refWords);
   check('IPA: epenthetic vowel found', resE.words[0].issues.some((i) => i.kind === 'epenthesis'), JSON.stringify(resE.words[0].items.map((i) => i.type)));
+
+  // 8. Goodness of pronunciation: graded score from the likelihood ratio
+  {
+    // frame with chosen probabilities: [[sym, prob], ...], the rest goes to blank
+    function probLogits(framesSpec, T) {
+      const flat = new Float32Array(T * V).fill(Math.log(1e-6));
+      for (let t = 0; t < T; t++) flat[t * V] = Math.log(0.999);
+      Object.entries(framesSpec).forEach(([f, list]) => {
+        let rest = 1;
+        list.forEach(([sym, p]) => { flat[f * V + id[sym]] = Math.log(p); rest -= p; });
+        flat[f * V] = Math.log(Math.max(1e-6, rest));
+      });
+      return { logp: flat, T, V, frameSec: 0.02 };
+    }
+    const refG = probLogits({ 5: [['ð', 0.95]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, 20);
+    const rp = greedyPhones(refG.logp, refG.T, refG.V, id2sym, 0);
+    const run = (spec) => {
+      const stu = probLogits(spec, 20);
+      const res = comparePhonemes(refG, stu, id2sym, [{ word: 'that', start: 0.08, end: 0.3 }]);
+      return res.words[0].items.filter((it) => it.ref);
+    };
+    const clear = run({ 5: [['ð', 0.9]], 9: [['æ', 0.9]], 13: [['t', 0.9]] });
+    const unsure = run({ 5: [['ð', 0.45], ['z', 0.5]], 9: [['æ', 0.9]], 13: [['t', 0.9]] });
+    const wrong = run({ 5: [['z', 0.95], ['ð', 0.02]], 9: [['æ', 0.9]], 13: [['t', 0.9]] });
+    const dropped = run({ 5: [['ð', 0.9]], 9: [['æ', 0.9]] });
+    check('GOP: clear sound scores near 1', clear[0].score > 0.95, clear[0].score.toFixed(2));
+    check('GOP: uncertain sound gets a middle score', unsure[0].score > 0.35 && unsure[0].score < 0.8, unsure[0].score.toFixed(2));
+    check('GOP: wrong sound scores near 0 and names what was heard', wrong[0].score < 0.1 && wrong[0].heard === 'z', wrong[0].score.toFixed(2) + ' ' + wrong[0].heard);
+    check('GOP: ordering clear > unsure > wrong', clear[0].score > unsure[0].score && unsure[0].score > wrong[0].score);
+    check('GOP: dropped final sound scores 0', dropped[2].score < 0.05, dropped[2].score.toFixed(3));
+    check('GOP: neighbours of an error keep their score', wrong[1].score > 0.95 && wrong[2].score > 0.95);
+    // a length variant of the expected vowel counts as the expected vowel
+    const refV = probLogits({ 5: [['ɑː', 0.95]] }, 12);
+    const stuV = probLogits({ 5: [['ɑː', 0.4], ['ɒ', 0.1]] }, 12);
+    const g = gopScores(stuV, greedyPhones(refV.logp, 12, V, id2sym, 0), [{ start: 5, end: 6 }], id2sym, 0);
+    check('GOP: weak but mostly uncontested sound is largely accepted', g[0].score > 0.65 && g[0].score < 0.9, g[0].score.toFixed(2));
+    check('GOP: speaker phones decoded', rp.map((p) => p.sym).join('') === 'ðæt');
+
+    // 9. The speaker as the point of reference: a sound the model hears badly even
+    //    from the speaker is not held against the student.
+    const word = [{ word: 'that', start: 0.08, end: 0.3 }];
+    const firstOf = (refSpec, stuSpec) => comparePhonemes(probLogits(refSpec, 20), probLogits(stuSpec, 20), id2sym, word).words[0];
+    const stuSpec = { 5: [['z', 0.6], ['ð', 0.3]], 9: [['æ', 0.9]], 13: [['t', 0.9]] };
+    const clearRef = firstOf({ 5: [['ð', 0.95]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, stuSpec);
+    const vagueRef = firstOf({ 5: [['ð', 0.5], ['z', 0.4]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, stuSpec);
+    const cItem = clearRef.items.find((it) => it.ref === 'ð'), vItem = vagueRef.items.find((it) => it.ref === 'ð');
+    check('GOP ref: clear speaker sound is judged in full', !cItem.unsure && cItem.weight === 1 && clearRef.issues.some((i) => i.kind === 'th'), cItem.score.toFixed(2));
+    check('GOP ref: sound unclear in the speaker is marked and not reported', vItem.unsure && vItem.weight < 0.5 && !vagueRef.issues.length, 'weight ' + vItem.weight.toFixed(2) + ' score ' + vItem.score.toFixed(2));
+    check('GOP ref: word score is not pulled down by the unclear sound', vagueRef.score > clearRef.score + 15, vagueRef.score + ' vs ' + clearRef.score);
+    check('GOP ref: other sounds keep full weight', vagueRef.items.filter((it) => it.ref && it.ref !== 'ð').every((it) => it.weight === 1 && !it.unsure));
+
+    // 10. Map of expected learner errors
+    // th -> z where a third sound (ɾ) is the model's first guess: the pair check still finds it
+    const hidden = firstOf({ 5: [['ð', 0.95]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, { 5: [['ɾ', 0.5], ['z', 0.4], ['ð', 0.05]], 9: [['æ', 0.9]], 13: [['t', 0.9]] });
+    const hk = hidden.items.find((it) => it.ref === 'ð').known;
+    check('error map: th -> z found behind another first guess', !!hk && hk.kind === 'th' && hk.heard === 'z', JSON.stringify(hk));
+    check('error map: the remark names the sound and gives a tip', hidden.issues.some((i) => i.kind === 'th' && /tongue/.test(i.text)), hidden.issues.map((i) => i.text).join(' | '));
+    check('error map: correct speech raises nothing', firstOf({ 5: [['ð', 0.95]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, { 5: [['ð', 0.9]], 9: [['æ', 0.9]], 13: [['t', 0.9]] }).items.every((it) => !it.known));
+    check('error map: skipped when the speaker pair is not separated by the model', !vagueRef.items.some((it) => it.known));
+    // long/short vowel: iː -> ɪ is invisible to the graded score (close variants) but is a rule of the map
+    const symsV = ['<pad>', 'ʃ', 'iː', 'ɪ', 'p'];
+    const idV = Object.fromEntries(symsV.map((x, i) => [x, i])), id2V = Object.fromEntries(symsV.map((x, i) => [i, x]));
+    const mk = (spec) => {
+      const flat = new Float32Array(20 * symsV.length).fill(Math.log(1e-6));
+      for (let t = 0; t < 20; t++) flat[t * symsV.length] = Math.log(0.999);
+      Object.entries(spec).forEach(([f, list]) => { let rest = 1; list.forEach(([sym, pr]) => { flat[f * symsV.length + idV[sym]] = Math.log(pr); rest -= pr; }); flat[f * symsV.length] = Math.log(Math.max(1e-6, rest)); });
+      return { logp: flat, T: 20, V: symsV.length, frameSec: 0.02 };
+    };
+    const sheep = comparePhonemes(mk({ 5: [['ʃ', 0.95]], 9: [['iː', 0.95]], 13: [['p', 0.95]] }), mk({ 5: [['ʃ', 0.9]], 9: [['ɪ', 0.85], ['iː', 0.05]], 13: [['p', 0.9]] }), id2V, [{ word: 'sheep', start: 0.08, end: 0.3 }]).words[0];
+    check('error map: long vowel said short (sheep -> ship)', sheep.issues.some((i) => i.kind === 'tense'), sheep.issues.map((i) => i.text).join(' | '));
+    // 11. Non-rhotic speaker: r after a vowel is taken out of the model's transcription
+    {
+      const sy = ['<pad>', 'ɹ', 'ɔː', 'ɚ', 'z', 'ə', 'j', 'k', 'm', 'n', 'ɪ', 'ŋ', 'ɐ', 'aɪ', 'v', 'd'];
+      const i2 = Object.fromEntries(sy.map((x, i) => [i, x]));
+      const ph = (str) => str.split(' ').map((x) => ({ sym: x, id: sy.indexOf(x), t: 0, conf: 1 }));
+      const fix = (str) => applyAccent(ph(str), 'non-rhotic', i2).map((x) => x.sym).join('');
+      check('accent: roarers', fix('ɹ ɔː ɹ ɹ ɚ z') === 'ɹɔːɹəz', fix('ɹ ɔː ɹ ɹ ɚ z'));
+      check('accent: morning, york', fix('m ɔː ɹ n ɪ ŋ') === 'mɔːnɪŋ' && fix('j ɔː ɹ k') === 'jɔːk');
+      check('accent: r before a vowel is kept', fix('ɐ ɹ aɪ v d') === 'ɐɹaɪvd');
+      check('accent: ids follow the symbols', applyAccent(ph('ɚ'), 'non-rhotic', i2)[0].id === sy.indexOf('ə'));
+      check('accent: rhotic speaker is left as is', applyAccent(ph('j ɔː ɹ k'), undefined, i2).length === 4);
+    }
+    setErrorMap(null);
+    check('error map: can be switched off', !firstOf({ 5: [['ð', 0.95]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, stuSpec).items.some((it) => it.known));
+    setErrorMap('zh');
+  }
 }
 
 console.log(failed ? `\n${failed} test(s) failed` : '\nAll tests passed');

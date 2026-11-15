@@ -1,12 +1,12 @@
 // Shadowing practice: page logic.
 import { fetchAudio16k, decodeTo16k, Recorder, playSamples, audioContext, SR } from './audio.js';
 import { buildAnalysis } from './analysis.js';
-import { compareAll, buildFeedback, verdict, STRICTNESS } from './scoring.js';
+import { compareAll, buildFeedback, verdict, STRICTNESS, SCORING_VERSION } from './scoring.js';
 import { drawStave, drawWave, drawSpectrogram } from './charts.js';
 import { splitWords } from './align.js';
 import { yinFrameHz } from './pitch.js';
-import { comparePhonemes } from './phonemes.js';
-import { inScorm, startReporting, report, phraseKey } from './report.js';
+import { comparePhonemes, setGopParams, setErrorMap } from './phonemes.js';
+import { inScorm, startReporting, report, phraseKey, statsAvailable, statsEnabled, setStatsEnabled } from './report.js';
 
 // Practice steps (a sequence: melody first, then shadowing, then alone)
 const MODES = {
@@ -550,7 +550,7 @@ async function runIpa(quiet) {
     if (!quiet) status('Comparing your sounds with the speaker…');
     const sp = await runPhon(stu.samples);
     if (token !== S.token || stu !== S.stu) return;
-    stu.phon = comparePhonemes(ref.phon, sp, sp.id2sym, refA.words, sp.blank);
+    stu.phon = comparePhonemes(ref.phon, sp, sp.id2sym, refA.words, sp.blank, { accent: S.lecture.accent });
     computeAndRender();
     if (stu.phon) report('ipa', { lecture: S.lecture.id, phrase: S.idx + 1 });
     status(stu.phon ? 'Done. The table now shows the sounds of each word in IPA.' : 'The speaker’s sounds could not be recognised in IPA.');
@@ -591,6 +591,7 @@ function reportAttempt(strictness) {
   if (!R || !st || R.overall == null) return;
   const sc = (x) => (x && x.score != null ? x.score : null);
   const speech = R.mode !== 'melody';   // humming: only melody and timing are scored
+  const I = R.intonation;
   report('attempt', {
     id: st.attempt, lecture: S.lecture.id, phrase: S.idx + 1, text: p.text, key: phraseKey(p),
     step: st.mode, overall: R.overall, passed: R.overall >= PASS,
@@ -598,7 +599,22 @@ function reportAttempt(strictness) {
     sounds: speech ? sc(R.pronunciation) : null, stress: speech ? sc(R.stress) : null,
     words: speech && R.words && R.words.accuracy != null ? Math.round(R.words.accuracy * 100) : null,
     listens: st.listens, duration: Math.round(st.duration * 10) / 10,
-    strictness, ipa: !!st.phon
+    strictness, ipa: !!st.phon,
+    // detail for research: method version, parts of the melody score, nuclear tone
+    // (speaker/student) and the rules of the error map that fired
+    version: SCORING_VERSION,
+    contour: I.ok ? I.parts.contour : null, syllables: I.ok ? I.parts.syllables : null,
+    tone: I.ok ? `${I.toneRef.tone}/${I.toneStu.tone}` : null,
+    // word by word: sounds score, melody score, speaker/student pitch movement, sounds in IPA
+    detail: (R.intonation.words || []).map((iw, i) => {
+      const pw = R.pronunciation.words && R.pronunciation.words[i];
+      return {
+        w: iw.word, s: pw ? pw.score : null, m: iw.score,
+        mv: iw.refMove && iw.stuMove ? iw.refMove.cls + '/' + iw.stuMove.cls : null,
+        ipa: pw && pw.ipaRef != null ? pw.ipaRef + '/' + pw.ipaStu : null
+      };
+    }),
+    errors: speech && st.phon ? [...new Set(st.phon.words.flatMap((w) => w.items.filter((it) => it.known).map((it) => it.known.kind)))].join(',') : null
   });
 }
 
@@ -799,7 +815,8 @@ function renderResults() {
     const rw = R.rhythm.words && R.rhythm.words[i];
     const sounds = pw ? `<span class="pill ${level(pw.score)}">${pw.score}</span>${pw.heard && pw.heard !== w.word.replace(/'/g, "'") && pw.score < 75 ? `<span class="heard-small">heard as “${esc(pw.heard)}”</span>` : ''}` : '<span class="pill none">–</span>';
     const mismatch = iw && iw.refMove && iw.stuMove && iw.refMove.cls !== iw.stuMove.cls;
-    const melody = iw ? `<span class="moves">${moveHtml(iw.refMove, 'model')}<span class="${mismatch ? 'move mismatch' : 'move'}">${moveHtml(iw.stuMove, 'you')}</span></span>` : '–';
+    const melPill = iw && iw.score != null ? `<span class="pill ${level(iw.score)}" title="How closely your pitch follows the speaker on this word">${iw.score}</span> ` : '';
+    const melody = iw ? `${melPill}<span class="moves">${moveHtml(iw.refMove, 'model')}<span class="${mismatch ? 'move mismatch' : 'move'}">${moveHtml(iw.stuMove, 'you')}</span></span>` : '–';
     let len = '–';
     if (rw) {
       const lbl = rw.ratio > 1.4 ? ['too long', 'warn'] : rw.ratio < 0.7 ? ['too short', 'warn'] : ['fine', 'good'];
@@ -856,10 +873,13 @@ function renderResults() {
 
 /** Speaker and student IPA with the differing sounds marked. */
 function ipaHtml(items) {
-  const refPart = items.filter((it) => it.ref).map((it) =>
-    it.type === 'match' ? esc(it.ref) : `<span class="${it.type === 'del' ? 'gone' : 'x'}">${esc(it.ref)}</span>`).join('');
-  const stuPart = items.filter((it) => it.stu).map((it) =>
-    it.type === 'match' ? esc(it.stu) : `<span class="x">${esc(it.stu)}</span>`).join('');
+  const unsure = (it, sym) => `<span class="unsure" title="This sound is hard for the model to hear even from the speaker, so it is not judged strictly">${esc(sym)}</span>`;
+  // A sound is marked as an error when its graded score is low or a rule of the error
+  // map fired, so the marks always agree with the number in the Sounds column.
+  const wrong = (it) => !!it.known || (!it.unsure && (it.ins || it.score < 0.5));
+  const mark = (it, sym, cls) => wrong(it) ? `<span class="${cls}">${esc(sym)}</span>` : it.unsure && it.type !== 'match' ? unsure(it, sym) : esc(sym);
+  const refPart = items.filter((it) => it.ref).map((it) => mark(it, it.ref, it.type === 'del' ? 'gone' : 'x')).join('');
+  const stuPart = items.filter((it) => it.stu).map((it) => mark(it, it.stu, 'x')).join('');
   return `<span class="ipa"><span title="Speaker">/${refPart}/</span><span class="you" title="You">/${stuPart || '–'}/</span></span>`;
 }
 
@@ -963,6 +983,9 @@ function selectPart(i) {
 async function init() {
   try {
     S.cfg = await loadConfig();
+    setGopParams(S.cfg.gop); // calibrated parameters of the sound score, if present
+    // map of expected learner errors: "errorMap": "zh" (default), or null to switch it off
+    if ('errorMap' in S.cfg) setErrorMap(S.cfg.errorMap, S.cfg.errorMapParams);
   } catch (e) {
     $('stave-msg').textContent = 'The list of phrases could not be loaded. Open the page through a web server, not as a file, and check data/lectures.json.';
     return;
@@ -1028,6 +1051,13 @@ async function init() {
 
   startWorker(cfg);
   startReporting(cfg, restoreFromMoodle);
+  // research statistics: tell the visitor and let them switch it off
+  if (statsAvailable()) {
+    const note = $('stats-note'), box = $('stats-on');
+    note.hidden = false;
+    box.checked = statsEnabled();
+    box.addEventListener('change', () => setStatsEnabled(box.checked));
+  }
   const savedLecture = store.get('lecture', null);
   const li = Math.max(0, cfg.lectures.findIndex((l) => l.id === savedLecture));
   selectLecture(li);

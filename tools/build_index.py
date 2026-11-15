@@ -23,8 +23,12 @@ Rules for file names
 lecture.json (all fields optional)
     {
       "title": "Ben Crystal on Original Pronunciation",
-      "texts": { "01 What was that.mp3": "What was that?" }
+      "texts": { "01 What was that.mp3": "What was that?" },
+      "accent": "non-rhotic"
     }
+
+  "accent": "non-rhotic" tells the sound check that the speaker does not pronounce
+  r after vowels (British RP). Leave it out for a rhotic speaker.
 
 Run:  python3 tools/build_index.py     (GitHub Actions runs it on every push)
 Uses only the Python standard library.
@@ -123,6 +127,8 @@ def build():
             "title": meta.get("title") or title_from_folder(folder.name),
             "phrases": [x[2] for x in items],
         }
+        if meta.get("accent"):
+            lecture["accent"] = meta["accent"]
         full = full_lecture(folder)
         if full:
             lecture["full"] = full

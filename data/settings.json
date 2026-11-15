@@ -9,5 +9,6 @@
   },
   "phonemes": "on-request",
   "publicUrl": "https://oletol.github.io/shadow/",
-  "goatcounter": null
+  "goatcounter": null,
+  "statsEndpoint": "https://script.google.com/macros/s/AKfycbzIkOr3wjqJ_nKgdvNob_9kA5m9dYU7pmGuabgDLgWK7e7pphV91v2yRv3-W7oAkHTP/exec"
 }

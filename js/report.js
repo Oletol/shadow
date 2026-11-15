@@ -5,6 +5,11 @@
 //    postMessage, and the package writes them to Moodle (journal, attempts report).
 //  * GoatCounter. When data/settings.json has "goatcounter", anonymous counts of
 //    visits and events (attempts, passed steps, problems) go to that GoatCounter site.
+//  * Research statistics. When data/settings.json has "statsEndpoint" (the address of
+//    a Google Apps Script web app, see tools/stats-apps-script.gs), every attempt is
+//    saved there as one row: scores, parts of the scores, word-by-word detail and a
+//    random anonymous code of the browser. No names, no audio. The visitor is told
+//    about it under the page and can switch it off.
 
 const params = new URLSearchParams(location.search);
 export const inScorm = params.has('scorm') && window.parent !== window;
@@ -24,6 +29,7 @@ export function phraseKey(p) {
 // onState({ connected, suspend }) is called once, when the SCORM package answers.
 export function startReporting(cfg, onState) {
   if (typeof cfg.goatcounter === 'string' && /^https:\/\//.test(cfg.goatcounter)) loadGoat(cfg.goatcounter);
+  startStats(cfg);
   if (!inScorm) return;
   let done = false;
   window.addEventListener('message', (ev) => {
@@ -39,6 +45,78 @@ export function startReporting(cfg, onState) {
 export function report(type, data = {}) {
   if (inScorm) post({ type, ...data });
   goatEvent(type, data);
+  if (type === 'attempt') statsAttempt(data);
+}
+
+// ---------------------------------------------------------------------------
+// Research statistics (anonymous, one row per attempt)
+// ---------------------------------------------------------------------------
+const LS_STATS = 'shadow.';
+const ls = {
+  get: (k) => { try { return localStorage.getItem(LS_STATS + k); } catch (_) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(LS_STATS + k, v); } catch (_) {} }
+};
+let statsUrl = null;
+const statsPending = new Map();   // attempt id -> {data, timer}
+
+export function statsAvailable() { return !!statsUrl; }
+export function statsEnabled() { return !!statsUrl && ls.get('statsOff') !== '1'; }
+export function setStatsEnabled(on) {
+  ls.set('statsOff', on ? '0' : '1');
+  if (!on) { statsPending.forEach((p) => clearTimeout(p.timer)); statsPending.clear(); }
+}
+
+/** Random code of this browser: links the attempts of one person without knowing who it is. */
+function anonId() {
+  let id = ls.get('anon');
+  if (!id) {
+    const a = new Uint8Array(9);
+    crypto.getRandomValues(a);
+    id = Array.from(a, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 12);
+    ls.set('anon', id);
+  }
+  return id;
+}
+
+function startStats(cfg) {
+  if (typeof cfg.statsEndpoint !== 'string' || !/^https:\/\//.test(cfg.statsEndpoint)) return;
+  statsUrl = cfg.statsEndpoint;
+  // whatever has not been sent yet goes out when the page is closed or hidden
+  window.addEventListener('pagehide', () => statsFlush(true));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') statsFlush(true); });
+}
+
+// An attempt is refined for a few seconds after the recording (speech recogniser,
+// IPA check), so it is sent once it has been quiet for 8 seconds.
+function statsAttempt(d) {
+  if (!statsEnabled() || d.id == null) return;
+  const prev = statsPending.get(d.id);
+  if (prev) clearTimeout(prev.timer);
+  statsPending.set(d.id, { data: d, timer: setTimeout(() => statsSend(d.id, false), 8000) });
+}
+
+function statsFlush(closing) { [...statsPending.keys()].forEach((id) => statsSend(id, closing)); }
+
+function statsSend(id, closing) {
+  const p = statsPending.get(id);
+  if (!p) return;
+  clearTimeout(p.timer);
+  statsPending.delete(id);
+  if (!statsEnabled()) return;
+  const d = p.data;
+  const body = JSON.stringify({
+    anon: anonId(), time: new Date().toISOString(), source: inScorm ? 'moodle' : 'web',
+    version: d.version, audio: d.lecture, phrase: d.phrase, text: d.text, step: d.step, attempt: d.id,
+    overall: d.overall, melody: d.melody, sounds: d.sounds, rhythm: d.rhythm, stress: d.stress, words: d.words,
+    contour: d.contour, syllables: d.syllables, tone: d.tone, errors: d.errors,
+    listens: d.listens, duration: d.duration, strictness: d.strictness, ipa: d.ipa,
+    detail: d.detail || null
+  });
+  // text/plain keeps the request "simple": Apps Script does not answer CORS preflights
+  try {
+    if (closing && navigator.sendBeacon) navigator.sendBeacon(statsUrl, body);
+    else fetch(statsUrl, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body }).catch(() => {});
+  } catch (_) {}
 }
 
 // ---------------------------------------------------------------------------

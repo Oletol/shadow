@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node tests/run-tests.mjs",
+    "test:live": "node tests/live-checks.mjs --all",
     "build": "python3 tools/build_index.py",
-    "serve": "python3 -m http.server 8000"
+    "serve": "python3 tools/serve.py"
   }
 }
