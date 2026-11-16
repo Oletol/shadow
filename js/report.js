@@ -108,7 +108,7 @@ function statsSend(id, closing) {
     anon: anonId(), time: new Date().toISOString(), source: inScorm ? 'moodle' : 'web',
     version: d.version, audio: d.lecture, phrase: d.phrase, text: d.text, step: d.step, attempt: d.id,
     overall: d.overall, melody: d.melody, sounds: d.sounds, rhythm: d.rhythm, stress: d.stress, words: d.words,
-    contour: d.contour, syllables: d.syllables, tone: d.tone, errors: d.errors,
+    contour: d.contour, syllables: d.syllables, trend: d.trend, tone: d.tone, errors: d.errors,
     listens: d.listens, duration: d.duration, strictness: d.strictness, ipa: d.ipa,
     detail: d.detail || null
   });

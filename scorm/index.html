@@ -124,6 +124,7 @@
     if (m.version) parts.push('v' + clean(m.version));
     if (num(m.contour) != null) parts.push('contour ' + num(m.contour));
     if (num(m.syllables) != null) parts.push('syllables ' + num(m.syllables));
+    if (num(m.trend) != null) parts.push('trend ' + num(m.trend));
     if (m.tone) parts.push('tone ' + clean(m.tone));
     if (typeof m.errors === 'string') parts.push('errors ' + (clean(m.errors) || 'none'));
     return parts.join('; ').slice(0, 255);

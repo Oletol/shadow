@@ -604,6 +604,7 @@ function reportAttempt(strictness) {
     // (speaker/student) and the rules of the error map that fired
     version: SCORING_VERSION,
     contour: I.ok ? I.parts.contour : null, syllables: I.ok ? I.parts.syllables : null,
+    trend: I.ok ? I.parts.trend : null,
     tone: I.ok ? `${I.toneRef.tone}/${I.toneStu.tone}` : null,
     // word by word: sounds score, melody score, speaker/student pitch movement, sounds in IPA
     detail: (R.intonation.words || []).map((iw, i) => {
@@ -796,8 +797,9 @@ function renderResults() {
     : R.rhythm.tempo < 0.92 ? `${Math.round((1 - R.rhythm.tempo) * 100)}% faster than the speaker` : 'Same speed as the speaker';
   const meters = [
     ['Melody', I.score, I.ok ? `Your pitch line is on average ${I.rmse.toFixed(1)} semitones from the speaker’s` : 'Not enough voice to compare', true],
-    ['Sounds', R.pronunciation.score, melodyOnly ? 'Not checked when humming' : R.pronunciation.score == null ? 'Needs the sound analysis model'
-      : R.pronunciation.phonemes ? 'Each sound compared with the speaker in IPA' : 'How clearly each sound came through; check in IPA for detail'],
+    ['Sounds', R.pronunciation.score, melodyOnly ? 'Not checked when humming' : R.pronunciation.score != null ? 'Each sound compared with the speaker in IPA'
+      : models.phon.state === 'failed' ? 'The IPA sound model is not available, so sounds are not scored'
+      : models.phon.state === 'ready' ? 'Comparing your sounds with the speaker in IPA…' : 'Scored by the IPA sound model: press “Check sounds in IPA”'],
     ['Rhythm', R.rhythm.score, tempoNote],
     ['Stress', R.stress.score, melodyOnly ? 'Not checked when humming' : R.stress.score != null ? 'Which words stand out and where' : 'Needs the sound analysis model']
   ];
@@ -813,7 +815,7 @@ function renderResults() {
     const pw = R.pronunciation.words[i];
     const iw = I.words && I.words[i];
     const rw = R.rhythm.words && R.rhythm.words[i];
-    const sounds = pw ? `<span class="pill ${level(pw.score)}">${pw.score}</span>${pw.heard && pw.heard !== w.word.replace(/'/g, "'") && pw.score < 75 ? `<span class="heard-small">heard as “${esc(pw.heard)}”</span>` : ''}` : '<span class="pill none">–</span>';
+    const sounds = pw && pw.score != null ? `<span class="pill ${level(pw.score)}">${pw.score}</span>` : '<span class="pill none">–</span>';
     const mismatch = iw && iw.refMove && iw.stuMove && iw.refMove.cls !== iw.stuMove.cls;
     const melPill = iw && iw.score != null ? `<span class="pill ${level(iw.score)}" title="How closely your pitch follows the speaker on this word">${iw.score}</span> ` : '';
     const melody = iw ? `${melPill}<span class="moves">${moveHtml(iw.refMove, 'model')}<span class="${mismatch ? 'move mismatch' : 'move'}">${moveHtml(iw.stuMove, 'you')}</span></span>` : '–';

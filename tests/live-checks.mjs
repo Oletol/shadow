@@ -1,4 +1,4 @@
-// Checks on real recordings: `node tests/live-checks.mjs [--all] [--json]`
+// Checks on real recordings: `node tests/live-checks.mjs [--all] [--json] [--only=sports]`
 //
 // 1. The speaker's own recordings are changed in ways that do NOT change the melody
 //    (shift in time, tempo, transposition, noise, telephone band, echo, loudness)
@@ -21,6 +21,8 @@ import { analysePitch } from '../js/pitch.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ALL = process.argv.includes('--all');
 const JSON_OUT = process.argv.includes('--json');
+// --only=<part of a folder name> limits the run to one audio folder
+const ONLY = (process.argv.find((a) => a.startsWith('--only=')) || '').slice(7).toLowerCase();
 
 function haveFfmpeg() {
   try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch (_) { return false; }
@@ -76,9 +78,11 @@ export const SAME_MELODY = [
 /**
  * Change the melody of a recording and keep everything else: the signal is resampled
  * at a rate that varies in time, so the pitch at every moment moves by delta(st, pos)
- * semitones (st: pitch there relative to the speaker's median, pos: 0..1 in the phrase).
+ * semitones (st: pitch there relative to the speaker's median, pos: 0..1 from the
+ * beginning to the end of the speech, so a slope is laid over the phrase itself and not
+ * over the silence around it).
  */
-function reshape(x, delta) {
+function reshape(x, delta, span) {
   const p = analysePitch(x, SR);
   const n = p.st.length;
   const st = Array.from(p.st);
@@ -98,7 +102,8 @@ function reshape(x, delta) {
     const f = Math.max(0, Math.min(n - 1, Math.round((pos / SR - p.t0) / p.hop)));
     const i = Math.floor(pos), fr = pos - i;
     out.push(x[i] * (1 - fr) + x[i + 1] * fr);
-    pos += Math.pow(2, delta(sm[f], pos / x.length) / 12);
+    const rel = span ? Math.max(0, Math.min(1, (pos / SR - span[0]) / (span[1] - span[0]))) : pos / x.length;
+    pos += Math.pow(2, delta(sm[f], rel) / 12);
   }
   return Float32Array.from(out);
 }
@@ -113,7 +118,8 @@ export const OTHER_MELODY = [
 /** Monotone speech is only a different melody when the speaker's own pitch moves. */
 const MIN_RANGE_FOR_MONOTONE = 4;
 
-const lectures = readdirSync(join(ROOT, 'assets'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+const lectures = readdirSync(join(ROOT, 'assets'), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+  .filter((n) => !ONLY || n.toLowerCase().includes(ONLY));
 const rows = [];
 let failed = 0;
 
@@ -129,39 +135,41 @@ for (const lec of lectures) {
   for (const it of pick) {
     const ref = buildAnalysis(it.samples, it.text, null);
     const run = (samples) => compareAll(ref, buildAnalysis(samples, it.text, null), { target: it.text, mode: 'melody' }).intonation;
+    const slope = (I) => I.ok && Number.isFinite(I.trendRef) ? [I.trendRef, I.trendStu, I.tilt].map((v) => +v.toFixed(1)) : null;
     for (const [name, change, min] of SAME_MELODY) {
       const samples = typeof change === 'function' ? change(it.samples) : change ? decode(join(dir, it.file), change) : it.samples;
       const I = run(samples);
       const ok = I.ok && I.score >= min;
       if (!ok) failed++;
-      rows.push({ lecture: lec, phrase: it.file, check: name, kind: 'same', score: I.score, limit: min, ok, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '' });
+      rows.push({ lecture: lec, phrase: it.file, check: name, kind: 'same', score: I.score, limit: min, ok, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '', slope: slope(I) });
     }
     // the pitch arrives late against a perfect alignment (as after an alignment error)
     for (const [ms, min] of [[80, 90], [120, 80]]) {
       const I = compareIntonation(ref, ref, (t) => t - ms / 1000);
       const ok = I.ok && I.score >= min;
       if (!ok) failed++;
-      rows.push({ lecture: lec, phrase: it.file, check: `alignment off by ${ms} ms`, kind: 'same', score: I.score, limit: min, ok, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '' });
+      rows.push({ lecture: lec, phrase: it.file, check: `alignment off by ${ms} ms`, kind: 'same', score: I.score, limit: min, ok, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '', slope: slope(I) });
     }
     // a different melody on the same words
     const self = run(it.samples);
     for (const [name, delta, max] of OTHER_MELODY) {
       if (name === 'monotone' && !(self.rangeRef >= MIN_RANGE_FOR_MONOTONE)) continue;
-      const I = run(reshape(it.samples, delta));
+      const I = run(reshape(it.samples, delta, ref.span));
       const ok = !I.ok || I.score <= max;
       if (!ok) failed++;
-      rows.push({ lecture: lec, phrase: it.file, check: name, kind: 'different', score: I.score, limit: max, ok, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '', range: self.rangeRef });
+      rows.push({ lecture: lec, phrase: it.file, check: name, kind: 'different', score: I.score, limit: max, ok, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '', range: self.rangeRef,
+        slope: slope(I), dur: +(ref.span[1] - ref.span[0]).toFixed(2) });
     }
     // other phrases of a similar length, for information only
     const others = items.filter((o) => o !== it && o.text !== it.text && o.dur > it.dur * 0.7 && o.dur < it.dur * 1.4).slice(0, 3);
     for (const o of others) {
       const I = run(o.samples);
-      rows.push({ lecture: lec, phrase: it.file, check: 'other phrase: ' + o.file.slice(0, 28), kind: 'other', score: I.score, limit: null, ok: true, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '' });
+      rows.push({ lecture: lec, phrase: it.file, check: 'other phrase: ' + o.file.slice(0, 28), kind: 'other', score: I.score, limit: null, ok: true, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '', slope: slope(I) });
     }
     // a second take of the same text by the speaker, shown for information only
     for (const o of items.filter((o) => o !== it && o.text === it.text)) {
       const I = run(o.samples);
-      rows.push({ lecture: lec, phrase: it.file, check: 'second take of the same phrase', kind: 'info', score: I.score, limit: null, ok: true, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '' });
+      rows.push({ lecture: lec, phrase: it.file, check: 'second take of the same phrase', kind: 'info', score: I.score, limit: null, ok: true, parts: I.parts, tones: I.ok ? I.toneRef.tone + '/' + I.toneStu.tone : '', slope: slope(I) });
     }
   }
 }

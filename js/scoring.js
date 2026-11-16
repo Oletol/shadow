@@ -1,6 +1,7 @@
 // Comparison of a student recording with the model recording.
 // Intonation is compared frame by frame on the model's time axis after
-// word-anchored time alignment; pronunciation uses wav2vec2 CTC letter posteriors.
+// word-anchored time alignment; sounds are scored by the phoneme model (phonemes.js),
+// the wav2vec2 letter model only gives the word boundaries.
 
 import { sampleTrack } from './pitch.js';
 import { buildTimeMap, alignWordLists, splitWords, envelopeTimeMap } from './align.js';
@@ -8,7 +9,7 @@ import { buildTimeMap, alignWordLists, splitWords, envelopeTimeMap } from './ali
 // Version of the scoring method. It is saved with every attempt, so that results
 // collected under different versions are never mixed in an analysis.
 // Change it whenever a formula, a weight or a threshold changes.
-export const SCORING_VERSION = '2026.11.15';
+export const SCORING_VERSION = '2026.11.15b';
 
 export const STRICTNESS = {
   lenient:  { sigma: 4.5, label: 'Lenient' },
@@ -163,6 +164,35 @@ export function findSyllables(p, span) {
   return out;
 }
 
+// Overall slope of the phrase, in semitones from its first to its last compared frame.
+// It is measured on the frames where both the speaker and the student have a pitch
+// value (the same frames as the rest of the comparison, so a recording compared with
+// itself gives exactly 0), as the slope of a line through the DIFFERENCE between the
+// two pitch lines: `tilt`. A melody repeated in another voice, at another speed or
+// with a delay has a tilt near 0; a rise of 10 semitones laid over the phrase has a
+// tilt of about 8-10. The line is the median of the slopes between pairs of frames
+// (Theil-Sen), so single wrong pitch values do not move it.
+// A tilt up to `free` semitones costs nothing (an alignment error of 80 ms alone gives
+// up to about 3); beyond it the part falls with tolerance `tol` x the strictness
+// sigma. The part also limits the Melody score: the lower it is, the closer the limit
+// comes to `capBase`; a phrase that goes the other way than the speaker's (each by
+// `level` semitones or more) cannot get more than `capOpposite`, whatever the
+// frame-by-frame tolerance lets through.
+export const TREND = { minFrames: 8, minSeconds: 0.2, free: 3, tol: 1.15, weight: 0.15, capBase: 50, capOpposite: 60, level: 2 };
+
+/** Robust slope of y over t: the median of the slopes between pairs of points. */
+function robustSlope(t, y) {
+  const step = Math.max(1, Math.floor(t.length / 150));
+  const slopes = [];
+  for (let i = 0; i < t.length; i += step) {
+    for (let j = i + step; j < t.length; j += step) {
+      const dt = t[j] - t[i];
+      if (dt >= 0.08) slopes.push((y[j] - y[i]) / dt);
+    }
+  }
+  return slopes.length ? percentile(slopes, 0.5) : NaN;
+}
+
 /** z-scores of a list (0 when all values are equal). */
 function zscores(arr) {
   const m = mean(arr), sd = Math.sqrt(mean(arr.map((v) => (v - m) ** 2)));
@@ -258,6 +288,26 @@ export function compareIntonation(ref, stu, map, strictness = 'standard') {
   // otherwise any melody, even the opposite one, would fit inside it.
   const rangeFactor = clamp(rangeRef / 7, 0.5, 1.6);
   const sigma = sigma0 * rangeFactor;
+
+  // Overall slope of the phrase (see TREND), on the frames scored on both sides.
+  let trendRef = NaN, trendStu = NaN, tilt = NaN, sTrend = null, trendOpposite = false;
+  {
+    const tt = [], rr = [], dd = [];
+    refScored.forEach((r, k) => {
+      if (Number.isFinite(r) && Number.isFinite(stuVals[k])) { tt.push(times[k]); rr.push(r); dd.push(stuVals[k] - r); }
+    });
+    if (tt.length >= TREND.minFrames && percentile(tt, 0.9) - percentile(tt, 0.1) >= TREND.minSeconds) {
+      const len = tt[tt.length - 1] - tt[0];
+      trendRef = robustSlope(tt, rr) * len;
+      tilt = robustSlope(tt, dd) * len;
+    }
+    if (Number.isFinite(tilt) && Number.isFinite(trendRef)) {
+      trendStu = trendRef + tilt;
+      const d = Math.max(0, Math.abs(tilt) - TREND.free);
+      sTrend = 100 * Math.exp(-((d / (TREND.tol * sigma0)) ** 2));
+      trendOpposite = trendRef * trendStu < 0 && Math.min(Math.abs(trendRef), Math.abs(trendStu)) >= TREND.level;
+    }
+  }
 
   // per word
   const words = [];
@@ -384,17 +434,24 @@ export function compareIntonation(ref, stu, map, strictness = 'standard') {
   const partsW = sSyll != null
     ? [[sRmse, 0.20], [sSyll, 0.20], [sShape, 0.18], [sTone, toneKnown ? 0.22 : 0], [sMove, 0.10], [sRange, 0.10]]
     : [[sRmse, 0.38], [sShape, 0.20], [sTone, toneKnown ? 0.22 : 0], [sMove, 0.10], [sRange, 0.10]];
+  if (sTrend != null) partsW.push([sTrend, TREND.weight]);
   let score = partsW.reduce((a, [v, w]) => a + v * w, 0) / partsW.reduce((a, [, w]) => a + w, 0);
+  // a phrase that as a whole goes the other way than the speaker's is not the same melody
+  let cappedByTrend = false;
+  if (sTrend != null) {
+    const cap = Math.min(TREND.capBase + (100 - TREND.capBase) * sTrend / 100, trendOpposite ? TREND.capOpposite : 100);
+    if (score > cap) { score = cap; cappedByTrend = true; }
+  }
   if (coverage < 0.35) score = Math.min(score, 60);
 
   return {
     ok: true, score: round(score), coverage, rmse, rmseExact, correlation: r, offset,
     rangeFactor, unreliableShare: refVoiced ? refUnreliable / refVoiced : 0,
-    rangeRef, rangeStu, rangeRatio,
+    rangeRef, rangeStu, rangeRatio, trendRef, trendStu, tilt, trendOpposite, cappedByTrend,
     toneRef, toneStu, nucWord, nucStart, nucBy, nucWordStu,
     syllables, sylRmse, nucRmse, nucleusSyllable: nucIdx, nucleusSyllableStu: nucIdxStu,
     peakWordRef, peakWordStu, moveAgree,
-    parts: { contour: round(sRmse), syllables: sSyll != null ? round(sSyll) : null, shape: round(sShape), tone: toneKnown ? sTone : null, movement: round(sMove), range: round(sRange) },
+    parts: { contour: round(sRmse), syllables: sSyll != null ? round(sSyll) : null, shape: round(sShape), tone: toneKnown ? sTone : null, movement: round(sMove), range: round(sRange), trend: sTrend != null ? round(sTrend) : null },
     words, times, refVals, stuVals
   };
 }
@@ -481,40 +538,22 @@ export function compareStress(ref, stu, map) {
   return { score: round(score), words, strongRef: strongR, strongStu: strongS, correlation: r };
 }
 
-/** Pronunciation quality from wav2vec2 letter posteriors, calibrated by the model speaker. */
+/**
+ * Sounds. The score comes from the phoneme model alone: goodness of pronunciation
+ * measured against the speaker, plus the map of expected errors (see phonemes.js).
+ * The letter model only gives the word boundaries; its confidences are not scored.
+ * Without the phoneme comparison there is no Sounds score at all.
+ */
 export function comparePronunciation(ref, stu, phon) {
-  if (!ref.words || !stu.words) return { score: null, words: [] };
+  if (!ref.words) return { score: null, words: [], phonemes: false };
+  const have = !!(phon && phon.score != null);
   const words = ref.words.map((rw, i) => {
-    const sw = stu.words[i];
-    const base = Math.max(0.45, rw.conf || 0);
-    const ratio = clamp((sw.conf || 0) / base, 0, 1);
-    const weak = [];
-    sw.letters.forEach((l, k) => {
-      const rl = rw.letters[k];
-      const refC = rl ? rl.conf : 0.9;
-      if (l.conf < 0.3 && refC > 0.5) weak.push(l.ch);
-    });
-    return {
-      index: i, word: rw.word, score: round(100 * Math.pow(ratio, 1.3)),
-      conf: sw.conf, refConf: rw.conf, heard: sw.heard, weakLetters: weak
-    };
+    const pw = have ? phon.words[i] : null;
+    const w = { index: i, word: rw.word, score: pw && pw.score != null ? pw.score : null, issues: pw ? pw.issues : [] };
+    if (pw) { w.ipaRef = pw.ref.join(''); w.ipaStu = pw.stu.join(''); w.phonItems = pw.items; }
+    return w;
   });
-  const totalLetters = words.reduce((s, w) => s + w.word.length, 0) || 1;
-  let score = words.reduce((s, w) => s + w.score * w.word.length, 0) / totalLetters;
-  // the phoneme comparison (IPA) is more precise: when present it carries 60%
-  if (phon && phon.score != null) {
-    words.forEach((w, i) => {
-      const pw = phon.words[i];
-      if (!pw) return;
-      w.ipaRef = pw.ref.join('');
-      w.ipaStu = pw.stu.join('');
-      w.phonItems = pw.items;
-      w.issues = pw.issues;
-      if (pw.score != null) { w.letterScore = w.score; w.score = round(0.4 * w.score + 0.6 * pw.score); }
-    });
-    score = 0.4 * score + 0.6 * phon.score;
-  }
-  return { score: round(score), words, phonemes: !!(phon && phon.score != null) };
+  return { score: have ? round(phon.score) : null, words, phonemes: have };
 }
 
 /** Did the student say the right words? Uses the Whisper transcript. */
@@ -606,6 +645,13 @@ export function buildFeedback(res) {
     } else if (I.rangeStu > I.rangeRef * 1.7 && I.rangeStu - I.rangeRef > 2) {
       push('warn', 'Intonation', `Your pitch moves much more than the model (${I.rangeStu.toFixed(1)} vs ${I.rangeRef.toFixed(1)} semitones). Keep the movements smaller.`);
     }
+    if (I.parts.trend != null && (I.parts.trend < 70 || I.trendOpposite)) {
+      const say = (v) => v <= -TREND.level ? 'goes down' : v >= TREND.level ? 'goes up' : 'stays at about the same height';
+      const a = say(I.trendRef), b = say(I.trendStu);
+      push(I.trendOpposite || I.parts.trend < 40 ? 'bad' : 'warn', 'Intonation',
+        a !== b ? `Over the whole phrase the speaker’s voice ${a}; yours ${b}. Listen to where the phrase starts and where it ends.`
+          : `Over the whole phrase your voice ${b} ${Math.abs(I.trendStu) > Math.abs(I.trendRef) ? 'more' : 'less'} than the speaker’s.`);
+    }
     I.words.forEach((w) => {
       if (!w.refMove || !w.stuMove || w.refMove.cls === w.stuMove.cls) return;
       const m = { rise: 'goes up', fall: 'goes down', level: 'stays level' };
@@ -624,14 +670,13 @@ export function buildFeedback(res) {
     }));
   }
   if (P.score != null) {
-    const weak = P.words.filter((w) => w.score < 60).sort((a, b) => a.score - b.score);
+    // a low word without a named error: point to the IPA column
+    const weak = P.words.filter((w) => w.score != null && w.score < 60 && !(w.issues && w.issues.length)).sort((a, b) => a.score - b.score);
     weak.slice(0, 3).forEach((w) => {
-      const letters = w.weakLetters.length ? ` Listen to the sounds spelled ${w.weakLetters.map((c) => `“${c.toLowerCase()}”`).join(', ')}.` : '';
-      const heard = w.heard && w.heard !== w.word ? ` The acoustic model heard “${w.heard}”.` : '';
-      push('bad', 'Pronunciation', `“${w.word}” is not clear yet (${w.score}/100).${heard}${letters}`, w.word);
+      push('bad', 'Sounds', `“${w.word}” is not clear yet (${w.score}/100). Compare its sounds with the speaker’s in the IPA column and listen to the word again.`, w.word);
     });
     const anyIssues = P.words.some((w) => w.issues && w.issues.length);
-    if (!weak.length && !anyIssues) push('good', 'Pronunciation', 'Every word was pronounced clearly.');
+    if (!weak.length && !anyIssues) push('good', 'Sounds', 'Every word was pronounced clearly.');
   }
 
   // Rhythm

@@ -17,7 +17,7 @@
  */
 var COLUMNS = ['time', 'anon', 'source', 'version', 'audio', 'phrase', 'text', 'step', 'attempt',
   'overall', 'melody', 'sounds', 'rhythm', 'stress', 'words', 'contour', 'syllables', 'tone',
-  'errors', 'listens', 'duration', 'strictness', 'ipa', 'detail'];
+  'errors', 'listens', 'duration', 'strictness', 'ipa', 'detail', 'trend'];
 
 function doPost(e) {
   var lock = LockService.getScriptLock();

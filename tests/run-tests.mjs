@@ -2,7 +2,7 @@
 import { yinTrack, analysePitch, voicedMedian } from '../js/pitch.js';
 import { phraseToLabels, ctcForcedAlign, greedyDecode, logSoftmax, normaliseText, alignWordLists, W2V_VOCAB } from '../js/align.js';
 import { buildAnalysis, speechSpan, SR } from '../js/analysis.js';
-import { compareAll, buildFeedback, classifyTone } from '../js/scoring.js';
+import { compareAll, buildFeedback, classifyTone, comparePronunciation } from '../js/scoring.js';
 import { comparePhonemes, gopScores, greedyPhones, setErrorMap, applyAccent } from '../js/phonemes.js';
 
 let failed = 0;
@@ -270,6 +270,36 @@ check('fallback without models still scores intonation', resNo.intonation.ok && 
     check('error map: can be switched off', !firstOf({ 5: [['ð', 0.95]], 9: [['æ', 0.95]], 13: [['t', 0.95]] }, stuSpec).items.some((it) => it.known));
     setErrorMap('zh');
   }
+}
+
+// 9. Overall slope of the phrase
+{
+  // speaker: three words stepping down by about 6 semitones; student: the same words stepping up
+  const down = (t) => t < 0.5 ? 180 : t < 0.85 ? 150 : 127;
+  const up = (t) => t < 0.5 ? 127 : t < 0.85 ? 150 : 180;
+  const refD = buildAnalysis(phrase(down, W, 1.6), text, null);
+  const I = (f, tempo = 1, shift = 0) => compareAll(refD, buildAnalysis(phrase(f, W, 1.6, tempo, shift), text, null), { target: text, mode: 'melody' });
+  const same = I(down, 1.15, -7), opp = I(up);
+  check('slope: same slope in another voice and tempo is not punished', same.intonation.parts.trend >= 95 && !same.intonation.cappedByTrend && same.intonation.score >= 85,
+    `${same.intonation.score}, part ${same.intonation.parts.trend}`);
+  check('slope: speaker down, student up is found', opp.intonation.trendOpposite && opp.intonation.trendRef < -2 && opp.intonation.trendStu > 2,
+    `${opp.intonation.trendRef.toFixed(1)} / ${opp.intonation.trendStu.toFixed(1)}`);
+  check('slope: opposite slope cannot score high', opp.intonation.score <= 60, String(opp.intonation.score));
+  check('slope: feedback names the direction', buildFeedback(opp).some((f) => /Over the whole phrase/.test(f.text)));
+  check('slope: no remark for the same slope', !buildFeedback(same).some((f) => /Over the whole phrase/.test(f.text)));
+}
+
+// 10. Sounds are scored by the phoneme model only
+{
+  const none = comparePronunciation(ref, good, null);
+  check('sounds: no phoneme comparison, no score', none.score == null && none.words.every((w) => w.score == null) && none.phonemes === false);
+  const resNoPh = compareAll(ref, good, { target: text, whisperText: 'What was that?' });
+  check('sounds: overall is formed without the Sounds score', resNoPh.pronunciation.score == null && resNoPh.overall != null, String(resNoPh.overall));
+  const phon = { score: 62, words: ref.words.map((w, i) => ({ score: [90, 40, 55][i], ref: ['a'], stu: ['a'], items: [], issues: [] })) };
+  const withPh = comparePronunciation(ref, good, phon);
+  check('sounds: score is the phoneme score, letters add nothing', withPh.score === 62 && withPh.words.map((w) => w.score).join() === '90,40,55', JSON.stringify(withPh.words.map((w) => w.score)));
+  const fbS = buildFeedback(compareAll(ref, good, { target: text, whisperText: 'What was that?', phonemes: phon }));
+  check('sounds: no “heard as” remarks', !fbS.some((f) => /heard|acoustic model/i.test(f.text)), fbS.map((f) => f.text).join(' | '));
 }
 
 console.log(failed ? `\n${failed} test(s) failed` : '\nAll tests passed');
